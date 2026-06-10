@@ -1,0 +1,144 @@
+{
+  "users": [
+    {
+      "id": "student_1",
+      "indexNumber": "10928374",
+      "fullName": "Clement Koffie",
+      "email": "koffieclement12@gmail.com",
+      "role": "student",
+      "passwordHash": "$2b$10$Un6O0D1G5/gXwz5Sfe9iV.vEq8b6b0pXf68qN5d6J2Z6o2.kL94gW",
+      "oauthConnected": false
+    },
+    {
+      "id": "student_2",
+      "indexNumber": "98765432",
+      "fullName": "Sarah Jenkins",
+      "email": "sarah.j@student.edu",
+      "role": "student",
+      "passwordHash": "$2b$10$Un6O0D1G5/gXwz5Sfe9iV.vEq8b6b0pXf68qN5d6J2Z6o2.kL94gW",
+      "oauthConnected": false
+    },
+    {
+      "id": "lecturer_1",
+      "indexNumber": "L-9001",
+      "fullName": "Dr. Emmanuel Vance",
+      "email": "emmanuel.vance@gdcms.edu",
+      "role": "lecturer",
+      "passwordHash": "$2b$10$Un6O0D1G5/gXwz5Sfe9iV.vEq8b6b0pXf68qN5d6J2Z6o2.kL94gW",
+      "oauthConnected": true
+    },
+    {
+      "id": "admin_1",
+      "indexNumber": "A-0001",
+      "fullName": "Admin Coordinator",
+      "email": "admin@gdcms.edu",
+      "role": "admin",
+      "passwordHash": "$2b$10$Un6O0D1G5/gXwz5Sfe9iV.vEq8b6b0pXf68qN5d6J2Z6o2.kL94gW",
+      "oauthConnected": false
+    }
+  ],
+  "courses": [
+    {
+      "id": "course_itn302",
+      "code": "ITN 302",
+      "name": "Data Communication & Computer Networks",
+      "lecturerId": "lecturer_1",
+      "description": "Fundamental concepts in network topologies, layer architectures, routing protocols, and client-server network socket programming."
+    },
+    {
+      "id": "course_syssec401",
+      "code": "SEC 401",
+      "name": "Information Systems Security & Cryptography",
+      "lecturerId": "lecturer_1",
+      "description": "Introduction to authentication, symmetric/asymmetric algorithms, AES encryption, RSA, hashing functions, and cloud security frameworks."
+    }
+  ],
+  "materials": [
+    {
+      "id": "mat_1",
+      "courseId": "course_syssec401",
+      "title": "SEC 401 - Course Syllabus & Grading Matrix",
+      "description": "Comprehensive semester schedule list, outline of assignments, textbooks, and final exam details.",
+      "type": "outline",
+      "uploadedBy": "lecturer_1",
+      "uploadedAt": "2026-06-01T10:00:00Z",
+      "fileKey": "syllabus_sec401.enc",
+      "originalName": "SEC401_Syllabus.pdf",
+      "mimeType": "application/pdf",
+      "fileSize": 328000
+    },
+    {
+      "id": "mat_2",
+      "courseId": "course_syssec401",
+      "title": "Lecture Slide 1: Introduction to AES & DES Cryptography",
+      "description": "Fundamentals of symmetric key cryptosystems, bit distribution permutations, and secure key exchanges.",
+      "type": "lecture_notes",
+      "uploadedBy": "lecturer_1",
+      "uploadedAt": "2026-06-03T14:30:00Z",
+      "fileKey": "notes_intro_aes.enc",
+      "originalName": "SEC401_Lecture1_AES.pdf",
+      "mimeType": "application/pdf",
+      "fileSize": 1420000
+    },
+    {
+      "id": "mat_3",
+      "courseId": "course_itn302",
+      "title": "Assignment 1: TCP Congestion Control and Socket Programming Protocol",
+      "description": "Develop a multi-threaded socket program detailing sliding window flow control. Due on 2026-06-25.",
+      "type": "assignment_prompt",
+      "uploadedBy": "lecturer_1",
+      "uploadedAt": "2026-06-05T09:12:00Z",
+      "fileKey": "assignment_tcp_socket.enc",
+      "originalName": "ITN302_Assignment1.pdf",
+      "mimeType": "application/pdf",
+      "fileSize": 450000
+    }
+  ],
+  "submissions": [
+    {
+      "id": "sub_1",
+      "assignmentId": "mat_3",
+      "studentId": "student_1",
+      "studentIndex": "10928374",
+      "studentName": "Clement Koffie",
+      "fileKey": "sub_socket_clement.enc",
+      "originalName": "Koffie_ITN302_Assignment1.pdf",
+      "uploadedAt": "2026-06-08T18:40:00Z",
+      "grade": "A",
+      "feedback": "Outstanding implementation of TCP congestion control logic. Multi-threading is robust and well commented. Keep it up!",
+      "gradedBy": "lecturer_1",
+      "gradedAt": "2026-06-09T11:22:00Z",
+      "status": "graded"
+    }
+  ],
+  "notes": [
+    {
+      "id": "note_1",
+      "studentId": "student_1",
+      "title": "Exam Prep on Cipher Block Chaining (CBC)",
+      "content": "Make sure to remember: 1. Initialization Vector (IV) must be completely random. 2. Plaintext is XORed with previous ciphertext block. 3. Identical plaintext blocks will result in entirely different ciphertext blocks.",
+      "updatedAt": "2026-06-09T18:00:00Z",
+      "isSynced": true
+    }
+  ],
+  "notifications": [
+    {
+      "id": "notif_1",
+      "userId": "student_1",
+      "title": "New Grade Published! 🎉",
+      "message": "Dr. Vance has graded your ITN 302 - Assignment 1 submission. You scored an A!",
+      "type": "grade",
+      "createdAt": "2026-06-09T11:22:00Z",
+      "isRead": false
+    },
+    {
+      "id": "notif_2",
+      "userId": "all",
+      "title": "Lecture Notes Uploaded 📚",
+      "message": "Dr. Vance uploaded Lecture Slide 1: Introduction to AES & DES Cryptography.",
+      "type": "material",
+      "createdAt": "2026-06-03T14:30:00Z",
+      "isRead": false
+    }
+  ]
+}

@@ -1,0 +1,3591 @@
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import { 
+  BookOpen, 
+  FileText, 
+  CheckCircle, 
+  Clock, 
+  Download, 
+  UploadCloud, 
+  User, 
+  Lock, 
+  LogOut, 
+  Search, 
+  Plus, 
+  RefreshCw, 
+  FileDown, 
+  ChevronRight, 
+  Layers, 
+  GraduationCap, 
+  ShieldCheck, 
+  Eye, 
+  BookOpenCheck,
+  CheckSquare,
+  Menu,
+  X,
+  Calendar,
+  Sliders,
+  ShieldAlert,
+  Trophy,
+  Activity,
+  Wrench,
+  Sparkles,
+  Users,
+  Palette
+} from "lucide-react";
+import OfflineIndicator from "./components/OfflineIndicator";
+import NotificationBell from "./components/NotificationBell";
+import DeadlineCalendar from "./components/DeadlineCalendar";
+import { User as UserType, Course, Material, Submission, PersonalNote, NotificationItem } from "./types";
+import { jsPDF } from "jspdf";
+
+export default function App() {
+  // Authentication & Session State
+  const [token, setToken] = useState<string | null>(() => localStorage.getItem("gdcms_token"));
+  const [currentUser, setCurrentUser] = useState<UserType | null>(null);
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authView, setAuthView] = useState<"welcome" | "login" | "register">("welcome");
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isLoadingUser, setIsLoadingUser] = useState(false);
+
+  // Scroll references for welcome landing page smooth-scroll behaviour
+  const purposeRef = useRef<HTMLDivElement>(null);
+  const modulesRef = useRef<HTMLDivElement>(null);
+  const trialRef = useRef<HTMLDivElement>(null);
+
+  // Smooth scroll helper
+  const handleSmoothScroll = (ref: React.RefObject<HTMLDivElement | null>) => {
+    ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  // Form Inputs: Login / Register
+  const [indexNumber, setIndexNumber] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState<"student" | "lecturer">("student");
+
+  // Core App Data Collections
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [materials, setMaterials] = useState<Material[]>([]);
+  const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [notes, setNotes] = useState<PersonalNote[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+
+  // Active UI Navigation / Selections
+  const [activeTab, setActiveTab] = useState<"dashboard" | "materials" | "assignments" | "notes" | "security">("dashboard");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCourseId, setSelectedCourseId] = useState<string>("all");
+
+  // Form Input: Add New Material (Lecturer Mode)
+  const [newMatTitle, setNewMatTitle] = useState("");
+  const [newMatDesc, setNewMatDesc] = useState("");
+  const [newMatType, setNewMatType] = useState<"outline" | "lecture_notes" | "assignment_prompt">("lecture_notes");
+  const [newMatCourse, setNewMatCourse] = useState("");
+  const [newMatFile, setNewMatFile] = useState<File | null>(null);
+  const [isUploadingMat, setIsUploadingMat] = useState(false);
+  const [uploadProgressMsg, setUploadProgressMsg] = useState("");
+
+  // Form Input: Submit Assignment (Student Mode)
+  const [subAssignmentId, setSubAssignmentId] = useState("");
+  const [subFile, setSubFile] = useState<File | null>(null);
+  const [isUploadingSub, setIsUploadingSub] = useState(false);
+
+  // Form Input: Add/Edit Personal Note
+  const [noteTitle, setNoteTitle] = useState("");
+  const [noteContent, setNoteContent] = useState("");
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+
+  // Personal Notes Custom Readability Options and Selection States
+  const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
+  const [notesFontFamily, setNotesFontFamily] = useState<"sans" | "serif" | "mono">(() => {
+    return (localStorage.getItem("gdcms_notes_font") as any) || "sans";
+  });
+  const [notesFontSize, setNotesFontSize] = useState<"sm" | "base" | "lg">(() => {
+    return (localStorage.getItem("gdcms_notes_size") as any) || "base";
+  });
+  const [notesColorTheme, setNotesColorTheme] = useState<"light" | "sepia" | "dark">(() => {
+    return (localStorage.getItem("gdcms_notes_theme") as any) || "light";
+  });
+
+  // Keyboard/Interactive States
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [showPublicSandbox, setShowPublicSandbox] = useState(true);
+  const [highlightedAssignmentId, setHighlightedAssignmentId] = useState<string | null>(null);
+  const [isSimulatingBuild, setIsSimulatingBuild] = useState(false);
+  const [simulationLogs, setSimulationLogs] = useState<string[]>([]);
+
+  // Admin Naming/Terminology & branding structural configuration
+  const [appConfig, setAppConfig] = useState(() => {
+    const saved = localStorage.getItem("gdcms_app_config");
+    return saved ? JSON.parse(saved) : {
+      systemName: "Group D Class Management System",
+      systemShort: "GDCMS",
+      assignmentsTerm: "Assignments",
+      materialsTerm: "Course Materials",
+      themeColor: "indigo",
+      fontSizePreset: "standard",
+      sidebarStyle: "dark-navy",
+      sandboxModeEnabled: true
+    };
+  });
+
+  // Dynamic Tailwind pairing configurations depending on selected theme color
+  const getThemeClasses = (color: string) => {
+    switch (color) {
+      case "emerald":
+        return {
+          primary: "bg-emerald-600 hover:bg-emerald-700 text-white",
+          text: "text-emerald-700",
+          textLight: "text-emerald-600",
+          border: "border-emerald-500",
+          borderLight: "border-emerald-100",
+          bgLight: "bg-emerald-50",
+          shadow: "shadow-emerald-600/15 shadow-sm",
+          ring: "focus:ring-emerald-500 focus-within:border-emerald-500"
+        };
+      case "rose":
+        return {
+          primary: "bg-rose-600 hover:bg-rose-700 text-white",
+          text: "text-rose-700",
+          textLight: "text-rose-600",
+          border: "border-rose-500",
+          borderLight: "border-rose-100",
+          bgLight: "bg-rose-50",
+          shadow: "shadow-rose-600/15 shadow-sm",
+          ring: "focus:ring-rose-500 focus-within:border-rose-500"
+        };
+      case "violet":
+        return {
+          primary: "bg-violet-600 hover:bg-violet-700 text-white",
+          text: "text-violet-700",
+          textLight: "text-violet-600",
+          border: "border-violet-500",
+          borderLight: "border-violet-100",
+          bgLight: "bg-violet-50",
+          shadow: "shadow-violet-600/15 shadow-sm",
+          ring: "focus:ring-violet-500 focus-within:border-violet-500"
+        };
+      case "amber":
+        return {
+          primary: "bg-amber-600 hover:bg-amber-700 text-white",
+          text: "text-amber-700",
+          textLight: "text-amber-600",
+          border: "border-amber-500",
+          borderLight: "border-amber-100",
+          bgLight: "bg-amber-50",
+          shadow: "shadow-amber-600/15 shadow-sm",
+          ring: "focus:ring-amber-500 focus-within:border-amber-500"
+        };
+      case "blue":
+        return {
+          primary: "bg-blue-600 hover:bg-blue-700 text-white",
+          text: "text-blue-700",
+          textLight: "text-blue-600",
+          border: "border-blue-500",
+          borderLight: "border-blue-100",
+          bgLight: "bg-blue-50",
+          shadow: "shadow-blue-600/15 shadow-sm",
+          ring: "focus:ring-blue-500 focus-within:border-blue-500"
+        };
+      case "slate":
+        return {
+          primary: "bg-slate-700 hover:bg-slate-800 text-white",
+          text: "text-slate-800",
+          textLight: "text-slate-600",
+          border: "border-slate-600",
+          borderLight: "border-slate-200",
+          bgLight: "bg-slate-55 bg-slate-100",
+          shadow: "shadow-slate-700/15 shadow-sm",
+          ring: "focus:ring-slate-500 focus-within:border-slate-500"
+        };
+      default: // indigo
+        return {
+          primary: "bg-indigo-600 hover:bg-indigo-700 text-white",
+          text: "text-indigo-700",
+          textLight: "text-indigo-600",
+          border: "border-indigo-500",
+          borderLight: "border-indigo-100",
+          bgLight: "bg-indigo-50",
+          shadow: "shadow-indigo-600/15 shadow-sm",
+          ring: "focus:ring-indigo-500 focus-within:border-indigo-500"
+        };
+    }
+  };
+
+  const themeTheme = getThemeClasses(appConfig.themeColor || "indigo");
+
+  const getSidebarStyle = (style: string) => {
+    switch (style) {
+      case "indigo-accent":
+        return {
+          aside: "bg-indigo-950 border-indigo-900 text-white",
+          border: "border-indigo-850/60 border-indigo-900/60",
+          itemActive: "bg-indigo-65 bg-indigo-600 text-white shadow-lg shadow-indigo-600/10",
+          itemInactive: "text-indigo-300 hover:bg-indigo-900 hover:text-white",
+          accentColor: "bg-indigo-600 shadow-indigo-600/25",
+          accentText: "text-indigo-400 bg-indigo-950 border-indigo-800",
+          badge: "bg-indigo-900 text-indigo-25 text-indigo-100",
+          subCard: "bg-indigo-900/40 border-indigo-900/60"
+        };
+      case "slate-minimal":
+        return {
+          aside: "bg-slate-50 border-slate-200 text-slate-900",
+          border: "border-slate-200",
+          itemActive: `${themeTheme.primary || "bg-indigo-600 text-white"} shadow-md`,
+          itemInactive: "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
+          accentColor: themeTheme.primary || "bg-indigo-600",
+          accentText: "text-slate-600 bg-slate-100 border-slate-200",
+          badge: "bg-slate-200 text-slate-800",
+          subCard: "bg-slate-100 border-slate-200"
+        };
+      case "emerald-forest":
+        return {
+          aside: "bg-emerald-950 border-emerald-900 text-white",
+          border: "border-emerald-850/60 border-emerald-900/60",
+          itemActive: "bg-emerald-600 text-white shadow-lg shadow-emerald-500/10",
+          itemInactive: "text-emerald-300 hover:bg-emerald-900 hover:text-white",
+          accentColor: "bg-emerald-600 shadow-emerald-600/25",
+          accentText: "text-emerald-400 bg-emerald-950 border-emerald-800",
+          badge: "bg-emerald-900 text-emerald-100",
+          subCard: "bg-emerald-900/40 border-emerald-900/60"
+        };
+      default: // dark-navy
+        return {
+          aside: "bg-slate-900 border-slate-800 text-white",
+          border: "border-slate-800",
+          itemActive: "bg-indigo-600 text-white shadow-lg shadow-indigo-600/15",
+          itemInactive: "text-slate-400 hover:bg-slate-800 hover:text-white",
+          accentColor: "bg-indigo-600 shadow-indigo-600/25",
+          accentText: "text-indigo-400 bg-indigo-950 border-indigo-800",
+          badge: "bg-slate-85 bg-slate-800 text-slate-300",
+          subCard: "bg-slate-950/40 border-slate-800"
+        };
+    }
+  };
+
+  const sideTheme = getSidebarStyle(appConfig.sidebarStyle || "dark-navy");
+
+  // Admin Interactive Panel States
+  const [authLogs, setAuthLogs] = useState<any[]>([]);
+  const [alertTarget, setAlertTarget] = useState("all");
+  const [alertTitle, setAlertTitle] = useState("");
+  const [alertMessage, setAlertMessage] = useState("");
+  const [isBroadcastingAlert, setIsBroadcastingAlert] = useState(false);
+  const [adminSubTab, setAdminSubTab] = useState<"lecturer" | "student">("lecturer");
+
+  // Fetch security authentication attempts logs from administrative APIs
+  const fetchAuthLogs = async () => {
+    try {
+      const res = await fetch("/api/admin/logs", {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAuthLogs(data);
+      }
+    } catch (err) {
+      console.error("Failed to load audit logs:", err);
+    }
+  };
+
+  // Safe purge of logins audits histories
+  const handleClearAuthLogs = async () => {
+    if (!window.confirm("Are you sure you want to permanently clear the login attempts security log history?")) {
+      return;
+    }
+    try {
+      const res = await fetch("/api/admin/logs/clear", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setAuthLogs([]);
+        alert("Security logs history deleted successfully.");
+      } else {
+        alert("Failed to clear security reports from database.");
+      }
+    } catch (err) {
+      console.error("Clear logs failure:", err);
+    }
+  };
+
+  // Submit rebranded / restructured specs server-side
+  const handleSaveAppConfigOnServer = async (updatedConfig: any) => {
+    try {
+      const res = await fetch("/api/admin/app-config", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify(updatedConfig)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAppConfig(data.appConfig);
+        localStorage.setItem("gdcms_app_config", JSON.stringify(data.appConfig));
+        alert("Success! GDCMS system restructured, rebranded, and synced server-side.");
+      } else {
+        const errJson = await res.json();
+        alert(errJson.error || "Administrative settings rejected.");
+      }
+    } catch (err) {
+      console.error("Failed syncing branding config on server:", err);
+      alert("Failed to sync branding settings to the server.");
+    }
+  };
+
+  // Broadcast advisory alert as direct in-app notification alerts
+  const handleBroadcastAlert = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!alertMessage.trim()) {
+      alert("Alert message text cannot be empty.");
+      return;
+    }
+    setIsBroadcastingAlert(true);
+    try {
+      const res = await fetch("/api/admin/broadcast-alert", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          targetRole: alertTarget,
+          title: alertTitle || "Advisory Notification from Admin Coordinator 🛡️",
+          message: alertMessage
+        })
+      });
+      if (res.ok) {
+        alert("Broadcast complete! Alert distributed to online cohorts feedback bells.");
+        setAlertTitle("");
+        setAlertMessage("");
+        fetchAppData(token!);
+      } else {
+        const errJson = await res.json();
+        alert(errJson.error || "Emergency broadcast rejected.");
+      }
+    } catch (err) {
+      console.error("Failed executing emergency broadcast:", err);
+      alert("An unexpected transport error hindered notification broadcasts.");
+    } finally {
+      setIsBroadcastingAlert(false);
+    }
+  };
+
+  // Load from local storage or cloud server config on startup
+  const fetchGlobalConfigOnStartup = async () => {
+    try {
+      const res = await fetch("/api/app-config");
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.systemName) {
+          setAppConfig(data);
+          localStorage.setItem("gdcms_app_config", JSON.stringify(data));
+        }
+      }
+    } catch (err) {
+      console.error("Global config mount sync omitted:", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchGlobalConfigOnStartup();
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("gdcms_app_config", JSON.stringify(appConfig));
+  }, [appConfig]);
+
+  useEffect(() => {
+    localStorage.setItem("gdcms_notes_font", notesFontFamily);
+    localStorage.setItem("gdcms_notes_size", notesFontSize);
+    localStorage.setItem("gdcms_notes_theme", notesColorTheme);
+  }, [notesFontFamily, notesFontSize, notesColorTheme]);
+
+  // Format student index numbers as BC/ITN/XX/XXX
+  const formatIndexNumberInput = (value: string, prevValue: string = "") => {
+    if (prevValue && value.length < prevValue.length) {
+      if (value.toLowerCase() === "bc/itn/") {
+        return "";
+      }
+      if (value.toLowerCase().startsWith("bc/itn/") && value.endsWith("/")) {
+        const currentClean = value.replace(/BC/gi, "").replace(/ITN/gi, "").replace(/[^a-zA-Z0-9]/g, "");
+        if (currentClean.length > 0) {
+          const cut = currentClean.slice(0, -1);
+          if (cut.length === 0) return "";
+          if (cut.length <= 2) return `BC/ITN/${cut}`;
+          return `BC/ITN/${cut.slice(0, 2)}/${cut.slice(2, 5)}`;
+        }
+      }
+    }
+
+    const trimmed = value.trim();
+    if (trimmed.includes("@") || trimmed.toUpperCase().startsWith("L-") || trimmed.toUpperCase().startsWith("A-")) {
+      return value;
+    }
+    
+    let clean = trimmed.replace(/BC/gi, "").replace(/ITN/gi, "").replace(/[^a-zA-Z0-9]/g, "");
+    
+    if (clean.length === 0) {
+      return value ? "BC/ITN/" : "";
+    }
+    
+    if (clean.length <= 2) {
+      return `BC/ITN/${clean}`;
+    } else {
+      return `BC/ITN/${clean.slice(0, 2)}/${clean.slice(2, 5)}`;
+    }
+  };
+
+  // Automatically clear inputs when switching between welcome, login, or register
+  useEffect(() => {
+    setIndexNumber("");
+    setFullName("");
+    setEmail("");
+    setPassword("");
+    setAuthError(null);
+  }, [authView]);
+
+  // Retrieve logs list when active user changes to admin
+  useEffect(() => {
+    if (currentUser?.role === "admin" && token) {
+      fetchAuthLogs();
+    }
+  }, [currentUser, token]);
+
+  // Lecturer - Student Assessment Tracking (Dynamic Mock Database state for performance reviews)
+  const [studentPerformance, setStudentPerformance] = useState([
+    { id: "stud_1", name: "Clement Koffie", index: "10928374", assignmentGrade: 88, quizGrade: 92, midsemGrade: 85, progressStatus: "Excellent" },
+    { id: "stud_2", name: "Sarah Jenkins", index: "10984729", assignmentGrade: 75, quizGrade: 82, midsemGrade: 78, progressStatus: "Consistent" }
+  ]);
+
+  const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
+  const [editAsgGrade, setEditAsgGrade] = useState<number>(0);
+  const [editQuizGrade, setEditQuizGrade] = useState<number>(0);
+  const [editMidsemGrade, setEditMidsemGrade] = useState<number>(0);
+
+  // Grading Form State (Lecturer Mode)
+  const [selectedSubmissionId, setSelectedSubmissionId] = useState<string | null>(null);
+  const [gradingScore, setGradingScore] = useState("");
+  const [gradingFeedback, setGradingFeedback] = useState("");
+  const [isSubmittingGrade, setIsSubmittingGrade] = useState(false);
+
+  // Monitor Auth Token & Fetch Identity on startup
+  useEffect(() => {
+    if (token) {
+      localStorage.setItem("gdcms_token", token);
+      fetchUserIdentity();
+    } else {
+      localStorage.removeItem("gdcms_token");
+      setCurrentUser(null);
+    }
+  }, [token]);
+
+  // Recovery of autosaved states
+  useEffect(() => {
+    try {
+      const savedNote = localStorage.getItem("gdcms_autosave_note");
+      if (savedNote) {
+        const { title, content, editingNoteId } = JSON.parse(savedNote);
+        if (title) setNoteTitle(title);
+        if (content) setNoteContent(content);
+        if (editingNoteId) setEditingNoteId(editingNoteId);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
+    try {
+      const savedMaterial = localStorage.getItem("gdcms_autosave_material");
+      if (savedMaterial) {
+        const { title, desc, type, course } = JSON.parse(savedMaterial);
+        if (title) setNewMatTitle(title);
+        if (desc) setNewMatDesc(desc);
+        if (type) setNewMatType(type);
+        if (course) setNewMatCourse(course);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
+    try {
+      const savedSub = localStorage.getItem("gdcms_autosave_submission");
+      if (savedSub) {
+        const { subAssignmentId } = JSON.parse(savedSub);
+        if (subAssignmentId) setSubAssignmentId(subAssignmentId);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+
+    try {
+      const savedGrading = localStorage.getItem("gdcms_autosave_grading");
+      if (savedGrading) {
+        const { selectedSubmissionId: selSubId, score, feedback } = JSON.parse(savedGrading);
+        if (selSubId) setSelectedSubmissionId(selSubId);
+        if (score) setGradingScore(score);
+        if (feedback) setGradingFeedback(feedback);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
+  // 10s Timer-based Autosave effect
+  useEffect(() => {
+    const timer = setInterval(() => {
+      // Save Notes Form
+      if (noteTitle || noteContent) {
+        localStorage.setItem("gdcms_autosave_note", JSON.stringify({
+          title: noteTitle,
+          content: noteContent,
+          editingNoteId
+        }));
+      } else {
+        localStorage.removeItem("gdcms_autosave_note");
+      }
+
+      // Save Material Form
+      if (newMatTitle || newMatDesc || newMatCourse) {
+        localStorage.setItem("gdcms_autosave_material", JSON.stringify({
+          title: newMatTitle,
+          desc: newMatDesc,
+          type: newMatType,
+          course: newMatCourse
+        }));
+      } else {
+        localStorage.removeItem("gdcms_autosave_material");
+      }
+
+      // Save Submissions Form
+      if (subAssignmentId) {
+        localStorage.setItem("gdcms_autosave_submission", JSON.stringify({
+          subAssignmentId
+        }));
+      } else {
+        localStorage.removeItem("gdcms_autosave_submission");
+      }
+
+      // Save Grading Feed Form
+      if (selectedSubmissionId || gradingScore || gradingFeedback) {
+        localStorage.setItem("gdcms_autosave_grading", JSON.stringify({
+          selectedSubmissionId,
+          score: gradingScore,
+          feedback: gradingFeedback
+        }));
+      } else {
+        localStorage.removeItem("gdcms_autosave_grading");
+      }
+    }, 10000);
+
+    return () => clearInterval(timer);
+  }, [
+    noteTitle, noteContent, editingNoteId,
+    newMatTitle, newMatDesc, newMatType, newMatCourse,
+    subAssignmentId,
+    selectedSubmissionId, gradingScore, gradingFeedback
+  ]);
+
+  // Read raw base64 contents helper to transfer over JSON APIs
+  const readFileAsBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        // Split metadata header out if present
+        const base64Data = result.includes(",") ? result.split(",")[1] : result;
+        resolve(base64Data);
+      };
+      reader.onerror = (error) => reject(error);
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const fetchUserIdentity = async () => {
+    setIsLoadingUser(true);
+    setAuthError(null);
+    try {
+      const res = await fetch("/api/auth/me", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCurrentUser(data);
+        fetchAppData(token!);
+      } else {
+        // Clear expired tokens
+        setToken(null);
+      }
+    } catch (err) {
+      console.error("Ident check failure:", err);
+    } finally {
+      setIsLoadingUser(false);
+    }
+  };
+
+  const fetchAppData = async (activeToken: string) => {
+    try {
+      const headers = { Authorization: `Bearer ${activeToken}` };
+      
+      const [resCourses, resMaterials, resSubmissions, resNotes, resNotifs] = await Promise.all([
+        fetch("/api/courses", { headers }),
+        fetch("/api/materials", { headers }),
+        fetch("/api/submissions", { headers }),
+        fetch("/api/notes", { headers }),
+        fetch("/api/notifications", { headers })
+      ]);
+
+      if (resCourses.ok) setCourses(await resCourses.json());
+      if (resMaterials.ok) setMaterials(await resMaterials.json());
+      if (resSubmissions.ok) setSubmissions(await resSubmissions.json());
+      if (resNotes.ok) setNotes(await resNotes.json());
+      if (resNotifs.ok) setNotifications(await resNotifs.json());
+    } catch (error) {
+      console.error("Critical dashboard batch fetch halted:", error);
+    }
+  };
+
+  // Login transaction handler
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    if (!indexNumber || !password) {
+      setAuthError("Identify number and account password are required.");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identifier: indexNumber, password })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setAuthError(data.error || "Login credential reject error.");
+        return;
+      }
+
+      setToken(data.token);
+    } catch (err) {
+      setAuthError("System network fault connecting to core services.");
+    }
+  };
+
+  // Registration transaction handler
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+
+    if (!fullName || !email || !password) {
+      setAuthError("Fill in all missing account detail fields.");
+      return;
+    }
+
+    if (role === "student" && !indexNumber) {
+      setAuthError("Student index ID is required for verification registration.");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          indexNumber: role === "student" ? indexNumber : undefined,
+          fullName,
+          email,
+          password,
+          role
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setAuthError(data.error || "Problem compiling registry record.");
+        return;
+      }
+
+      setToken(data.token);
+    } catch (e) {
+      setAuthError("Security registry offline.");
+    }
+  };
+
+  // Quick Access Trial Login for Admin, Lecturer and Students
+  const handleQuickLogin = async (identifier: string) => {
+    setAuthError(null);
+    setIsLoadingUser(true);
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          identifier,
+          password: "123456" // standard trial password check
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setToken(data.token);
+      } else {
+        setAuthError(data.error || "Trial authentication failed.");
+      }
+    } catch (e) {
+      setAuthError("Trial backend pipeline connection timeout.");
+    } finally {
+      setIsLoadingUser(false);
+    }
+  };
+
+  // Sign out
+  const handleSignOut = async () => {
+    if (token) {
+      try {
+        await fetch("/api/auth/logout", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` }
+        });
+      } catch (e) {}
+    }
+    setToken(null);
+    setCurrentUser(null);
+    setCourses([]);
+    setMaterials([]);
+    setSubmissions([]);
+    setNotes([]);
+    setNotifications([]);
+    setAuthView("welcome");
+  };
+
+  // Material Upload (Lecturer Area)
+  const handleUploadMaterial = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token) return;
+
+    if (!newMatTitle || !newMatCourse || !newMatFile) {
+      alert("Material Title, target Course and valid PDF document are mandatory inputs.");
+      return;
+    }
+
+    setIsUploadingMat(true);
+    setUploadProgressMsg("AES-256 binary matrix conversion...");
+
+    try {
+      const base64Data = await readFileAsBase64(newMatFile);
+      setUploadProgressMsg("Transmitting encrypted block...");
+
+      const res = await fetch("/api/materials/upload", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          title: newMatTitle,
+          description: newMatDesc,
+          type: newMatType,
+          courseId: newMatCourse,
+          fileName: newMatFile.name,
+          fileData: base64Data,
+          mimeType: newMatFile.type
+        })
+      });
+
+      const result = await res.json();
+      if (res.ok) {
+        // Clear fields
+        setNewMatTitle("");
+        setNewMatDesc("");
+        setNewMatFile(null);
+        localStorage.removeItem("gdcms_autosave_material");
+        // Force reload content feed
+        fetchAppData(token);
+        alert("Success! Document ciphered and catalogued in storage disk.");
+      } else {
+        alert(result.error || "Upload rejected.");
+      }
+    } catch (err) {
+      alert("Dynamic AES encryption script error.");
+    } finally {
+      setIsUploadingMat(false);
+      setUploadProgressMsg("");
+    }
+  };
+
+  // Student Assignment Upload Submission
+  const handleStudentSubmission = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token) return;
+
+    if (!subAssignmentId || !subFile) {
+      alert("Please select the target Assignment outline and choose a file to submit.");
+      return;
+    }
+
+    setIsUploadingSub(true);
+    try {
+      const base64Data = await readFileAsBase64(subFile);
+
+      const res = await fetch("/api/submissions/upload", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          assignmentId: subAssignmentId,
+          fileName: subFile.name,
+          fileData: base64Data,
+          mimeType: subFile.type
+        })
+      });
+
+      const result = await res.json();
+      if (res.ok) {
+        setSubFile(null);
+        localStorage.removeItem("gdcms_autosave_submission");
+        fetchAppData(token);
+        alert("Assignment submitted and cryptographically sealed on the cloud.");
+      } else {
+        alert(result.error || "Upload failed.");
+      }
+    } catch (err) {
+      alert("Submission failed during cryptographic preparation stage.");
+    } finally {
+      setIsUploadingSub(false);
+    }
+  };
+
+  // Grade Assessment (Lecturer Activity)
+  const handleGradeSubmission = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token || !selectedSubmissionId || !gradingScore) return;
+
+    setIsSubmittingGrade(true);
+    try {
+      const res = await fetch("/api/submissions/grade", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          submissionId: selectedSubmissionId,
+          grade: gradingScore,
+          feedback: gradingFeedback
+        })
+      });
+
+      const result = await res.json();
+      if (res.ok) {
+        setSelectedSubmissionId(null);
+        setGradingScore("");
+        setGradingFeedback("");
+        localStorage.removeItem("gdcms_autosave_grading");
+        fetchAppData(token);
+        alert("Grade recorded and immediate push alert triggered to student dashboard!");
+      } else {
+        alert(result.error || "System rejected grade write.");
+      }
+    } catch (err) {
+      alert("System connection error while saving grade evaluations.");
+    } finally {
+      setIsSubmittingGrade(false);
+    }
+  };
+
+  // Save Encrypted Student Personal Note
+  const handleSaveNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!noteTitle) {
+      alert("Please enter a note header.");
+      return;
+    }
+
+    const notePayload = {
+      id: editingNoteId || "client_note_" + Math.random().toString(36).substring(2, 9),
+      title: noteTitle,
+      content: noteContent,
+      updatedAt: new Date().toISOString()
+    };
+
+    // Case 1: Browser is Offline, append in browser client local persistent pool!
+    if (!navigator.onLine) {
+      try {
+        const storedStr = localStorage.getItem("gdcms_offline_notes") || "[]";
+        const storedArr = JSON.parse(storedStr) as any[];
+        
+        const existingIdx = storedArr.findIndex(n => n.id === notePayload.id);
+        if (existingIdx !== -1) {
+          storedArr[existingIdx] = notePayload;
+        } else {
+          storedArr.push(notePayload);
+        }
+        localStorage.setItem("gdcms_offline_notes", JSON.stringify(storedArr));
+
+        // Inject simulated unsynced note locally for instant smooth render!
+        const optimisticNotes = [...notes];
+        const localIdx = optimisticNotes.findIndex(n => n.id === notePayload.id);
+        
+        const enrichedLocalNote = {
+          ...notePayload,
+          studentId: currentUser?.id || "temp",
+          isSynced: false
+        };
+
+        if (localIdx !== -1) {
+          optimisticNotes[localIdx] = enrichedLocalNote;
+        } else {
+          optimisticNotes.push(enrichedLocalNote);
+        }
+        setNotes(optimisticNotes);
+
+        // Reset inputs
+        setNoteTitle("");
+        setNoteContent("");
+        setEditingNoteId(null);
+        localStorage.removeItem("gdcms_autosave_note");
+        alert("No internet connection detected. Note has been safe-cached locally.");
+      } catch (e) {
+        console.error(e);
+      }
+      return;
+    }
+
+    // Case 2: System Online, push directly to live API (which executes automatic AES-256 block text locking)
+    if (!token) return;
+
+    try {
+      const res = await fetch("/api/notes", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(notePayload)
+      });
+
+      const result = await res.json();
+      if (res.ok) {
+        setNoteTitle("");
+        setNoteContent("");
+        setEditingNoteId(null);
+        localStorage.removeItem("gdcms_autosave_note");
+        fetchAppData(token);
+      } else {
+        alert(result.error || "Note write error.");
+      }
+    } catch (err) {
+      alert("An unexpected error occurred saving notebook entry.");
+    }
+  };
+
+  // Delete Personal Note
+  const handleDeleteNoteLocal = (noteId: string) => {
+    // Basic offline or online exclusion UI simulator
+    const updated = notes.filter(n => n.id !== noteId);
+    setNotes(updated);
+    
+    // Also strip from browser localStorage outbox if present
+    try {
+      const storedStr = localStorage.getItem("gdcms_offline_notes");
+      if (storedStr) {
+        const arr = JSON.parse(storedStr);
+        const filtered = arr.filter((n: any) => n.id !== noteId);
+        localStorage.setItem("gdcms_offline_notes", JSON.stringify(filtered));
+      }
+    } catch (e) {}
+
+    // Deselect note index if it is currently inside the selection queue
+    setSelectedNoteIds(prev => prev.filter(id => id !== noteId));
+  };
+
+  // Export selected student notes to formatted PDF document
+  const handleExportSelectedNotesToPDF = () => {
+    const selectedNotes = notes.filter(note => selectedNoteIds.includes(note.id));
+    if (selectedNotes.length === 0) {
+      alert("Please select at least one study note from your collection to export.");
+      return;
+    }
+
+    try {
+      const doc = new jsPDF();
+      let yOffset = 20;
+
+      // Title Banner with beautiful styling
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(20);
+      doc.setTextColor(79, 70, 229); // Beautiful Indigo brand color theme
+      doc.text("GDCMS - SECURED STUDY NOTEBOOK BACKUP", 15, yOffset);
+      yOffset += 7;
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(100, 116, 139); // Gray slate color
+      doc.text(`Student: ${currentUser?.fullName || "Active Student"} (${currentUser?.indexNumber || "Index ID not verified"})`, 15, yOffset);
+      yOffset += 5;
+      doc.text(`Generated On: ${new Date().toLocaleString()}  |  Total Selected Notes: ${selectedNotes.length}`, 15, yOffset);
+      yOffset += 5;
+
+      // Draw horizontal divider line
+      doc.setDrawColor(226, 232, 240); // slate-200
+      doc.setLineWidth(0.5);
+      doc.line(15, yOffset, 195, yOffset);
+      yOffset += 12;
+
+      selectedNotes.forEach((note, index) => {
+        // Enforce page breaks between note items if current space is cramped
+        if (yOffset > 240) {
+          doc.addPage();
+          yOffset = 20;
+        }
+
+        // Title of the Note
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(13);
+        doc.setTextColor(15, 23, 42); // slate-900
+        doc.text(`${index + 1}. ${note.title}`, 15, yOffset);
+        yOffset += 6;
+
+        // Meta info (Updated timestamp & sync status)
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(9);
+        doc.setTextColor(148, 163, 184); // slate-400
+        const syncLabel = note.isSynced ? "Decrypted cloud sync (AES-256 Verified)" : "Local browser client storage-cache";
+        doc.text(`Modified at: ${new Date(note.updatedAt).toLocaleString()}  |  Storage: ${syncLabel}`, 15, yOffset);
+        yOffset += 8;
+
+        // Content body text
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        doc.setTextColor(51, 65, 85); // slate-700
+
+        // Auto-wrap using splitTextToSize to prevent horizontal clipping
+        const maxTextWidth = 180; // 195 - 15 margins
+        const wrappedLines = doc.splitTextToSize(note.content, maxTextWidth);
+        const linesCount = wrappedLines.length;
+        const totalBlockHeight = linesCount * 5.5; // spaced 5.5mm per line
+
+        // Check if writing the text block causes bottom overflow
+        if (yOffset + totalBlockHeight > 275) {
+          doc.addPage();
+          yOffset = 20;
+        }
+
+        doc.text(wrappedLines, 15, yOffset);
+        yOffset += totalBlockHeight + 12;
+
+        // Separator between notes (if not the last one)
+        if (index < selectedNotes.length - 1) {
+          doc.setDrawColor(241, 245, 249); // slate-100
+          doc.line(15, yOffset - 5, 195, yOffset - 5);
+        }
+      });
+
+      doc.save(`GDCMS_My_Study_Notes_${new Date().toISOString().slice(0, 10)}.pdf`);
+    } catch (e: any) {
+      console.error("PDF Compiling Fault:", e);
+      alert("Failed generating local backup PDF file. Error: " + (e.message || e));
+    }
+  };
+
+  // Search filter computes
+  const filteredMaterials = useMemo(() => {
+    return materials.filter(m => {
+      const matchesCourse = selectedCourseId === "all" || m.courseId === selectedCourseId;
+      const matchesQuery = m.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                           m.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                           m.uploadedBy.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchesCourse && matchesQuery;
+    });
+  }, [materials, selectedCourseId, searchQuery]);
+
+  const filteredNotes = useMemo(() => {
+    return notes.filter(n => {
+      const matchesQuery = n.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                           n.content.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchesQuery;
+    });
+  }, [notes, searchQuery]);
+
+  // Compute calculated values for dynamic stats display
+  const studentSubmissionsMap = useMemo(() => {
+    const map: Record<string, Submission> = {};
+    submissions.forEach(s => {
+      map[s.assignmentId] = s;
+    });
+    return map;
+  }, [submissions]);
+
+  // Calculate student general index completion (dummy stats calculation for GDCMS portal visualization)
+  const totalCourseMaterialsCount = materials.length;
+  const submissionsCount = submissions.length;
+  const assignmentsPromptsCount = materials.filter(m => m.type === "assignment_prompt").length;
+
+  const totalProgressPercentage = useMemo(() => {
+    if (assignmentsPromptsCount === 0) return 78; // static fallback standard layout fallback
+    return Math.min(100, Math.round((submissionsCount / assignmentsPromptsCount) * 100));
+  }, [submissionsCount, assignmentsPromptsCount]);
+
+  if (!token) {
+    // ---------------------------------------------------------
+    // RENDER SYSTEM WELCOME LANDING & INTUITIVE GATEWAY INTERFACE
+    // ---------------------------------------------------------
+    return (
+      <div className="min-h-screen bg-slate-50 text-slate-950 flex flex-col selection:bg-indigo-600 selection:text-white" style={{ fontFamily: "Inter, system-ui, sans-serif" }}>
+        
+        {/* FIXED SUBTLE NAVIGATION NAVBAR HEADER */}
+        <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-200 px-6 py-4 flex items-center justify-between shadow-sm">
+          <div className="flex items-center space-x-3 cursor-pointer" onClick={() => setAuthView("welcome")}>
+            <div className="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center font-black text-white shadow-md shadow-indigo-600/25">
+              G
+            </div>
+            <div className="flex flex-col">
+              <span className="text-sm font-black tracking-tight uppercase text-indigo-950">GDCMS</span>
+              <span className="text-[9px] text-slate-500 tracking-wider uppercase font-bold">Group D Portal</span>
+            </div>
+          </div>
+
+          {authView === "welcome" && (
+            <nav className="hidden md:flex items-center space-x-6 text-xs font-bold text-slate-600">
+              <button 
+                onClick={() => handleSmoothScroll(purposeRef)} 
+                className="hover:text-indigo-600 transition-colors cursor-pointer"
+              >
+                Our Purpose
+              </button>
+              <button 
+                onClick={() => handleSmoothScroll(modulesRef)} 
+                className="hover:text-indigo-600 transition-colors cursor-pointer"
+              >
+                Core Modules
+              </button>
+            </nav>
+          )}
+
+          <div className="flex items-center space-x-2">
+            {authView !== "welcome" ? (
+              <button
+                onClick={() => { setAuthView("welcome"); setAuthError(null); }}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-705 text-xs font-bold rounded-xl transition-all cursor-pointer"
+              >
+                Back to Welcome Screen
+              </button>
+            ) : (
+              <button
+                onClick={() => { setAuthView("login"); setAuthError(null); }}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-all shadow-md cursor-pointer"
+              >
+                Sign In
+              </button>
+            )}
+          </div>
+        </header>
+
+        {/* WELCOME VIEW DISPLAY */}
+        {authView === "welcome" && (
+          <main className="flex-1 flex flex-col">
+            
+            {/* HERO INTRODUCTION FOLD */}
+            <section className="bg-gradient-to-b from-slate-100 to-white py-16 px-6 border-b border-slate-200">
+              <div className="max-w-4xl mx-auto text-center space-y-6">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-indigo-50 border border-indigo-100 rounded-full text-[10px] font-extrabold text-indigo-700 uppercase tracking-widest leading-none">
+                  <span className="w-1.5 h-1.5 bg-indigo-600 rounded-full animate-ping"></span>
+                  Official Release • Group D Class Management System
+                </div>
+                
+                <h1 className="text-4xl md:text-5xl font-black text-slate-900 tracking-tight leading-none md:leading-tight">
+                  Academic Operations, <br className="hidden sm:block" />
+                  <span className="text-indigo-600">Streamlined for Group D.</span>
+                </h1>
+
+                <p className="text-slate-600 text-sm md:text-base max-w-2xl mx-auto leading-relaxed font-medium">
+                  Welcome to GDCMS — the Group D Class Management System. Designed to foster collaboration, study excellence, and smooth workflow logs, this integrated hub empowers lecturers to distribute dynamic course outline syllabus documents, lecture files, and assignment prompts. Students stay on schedule with verified resource downloads, coursework submissions, and marked evaluation reports, while administrators coordinate rosters and courses with absolute precision.
+                </p>
+
+                {/* ONLY TWO MAIN ENTRANCE PORTAL BUTTONS AVAILABLE */}
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
+                  <button
+                    onClick={() => { setAuthView("login"); setAuthMode("login"); setAuthError(null); }}
+                    className="w-full sm:w-auto px-8 py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all shadow-xl shadow-indigo-600/20 hover:scale-102 cursor-pointer pointer-events-auto"
+                  >
+                    Login to Account
+                  </button>
+                  <button
+                    onClick={() => { setAuthView("register"); setAuthMode("register"); setRole("student"); setAuthError(null); }}
+                    className="w-full sm:w-auto px-8 py-4 bg-white hover:bg-slate-100 text-slate-900 border border-slate-300 font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all hover:scale-102 cursor-pointer"
+                  >
+                    Sign Up If New Student
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            {/* SECTION 1: SYSTEM PURPOSE */}
+            <section ref={purposeRef} id="purpose" className="py-16 px-6 border-b border-slate-200 bg-white">
+              <div className="max-w-4xl mx-auto space-y-8">
+                <div className="text-center space-y-1">
+                  <h2 className="text-xs uppercase font-extrabold tracking-widest text-indigo-600">Portal Purpose</h2>
+                  <p className="text-2xl font-black text-slate-900 tracking-tight">Fostering Connected Learning</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-sm leading-relaxed text-slate-600">
+                  <div className="space-y-4">
+                    <div className="w-10 h-10 bg-indigo-55 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center font-bold">01</div>
+                    <h3 className="font-bold text-slate-800 text-base">Classroom Synchronization</h3>
+                    <p className="font-medium text-slate-500">
+                      GDCMS acts as the single source of truth for your cohort. Gone are the days of missing links, outdated syllabi, or unnotified schedule updates. Access instant course outlines, guidelines, exam details, and lectures with one-click verified downloads.
+                    </p>
+                  </div>
+                  <div className="space-y-4">
+                    <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center font-bold">02</div>
+                    <h3 className="font-bold text-slate-800 text-base">Qualitative Marked Reports</h3>
+                    <p className="font-medium text-slate-500">
+                      Our interactive submissions queue bridges the evaluation gap. Instructors can download submitted scripts, assign granular grades, and return constructive feedback notes directly to student notifications feeds for personalized coaching.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* SECTION 2: SYSTEM MODULES */}
+            <section ref={modulesRef} id="modules" className="py-16 px-6 border-b border-slate-200 bg-slate-50/50">
+              <div className="max-w-4xl mx-auto space-y-8">
+                <div className="text-center space-y-1">
+                  <h2 className="text-xs uppercase font-extrabold tracking-widest text-indigo-600">Core Modules</h2>
+                  <p className="text-2xl font-black text-slate-900 tracking-tight">Structured Interactive Workspace</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="bg-white p-6 border border-slate-200 rounded-2xl shadow-sm space-y-3">
+                    <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl w-fit">
+                      <BookOpen className="w-5 h-5" />
+                    </div>
+                    <h4 className="font-bold text-slate-900 text-sm">Syllabus Outlines</h4>
+                    <p className="text-xs text-slate-500 font-medium leading-relaxed">
+                      Instant file access folders for course documents, lecture prompts, slides and references curated by your subject professors.
+                    </p>
+                  </div>
+
+                  <div className="bg-white p-6 border border-slate-200 rounded-2xl shadow-sm space-y-3">
+                    <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl w-fit">
+                      <FileText className="w-5 h-5" />
+                    </div>
+                    <h4 className="font-bold text-slate-900 text-sm">Assignments Portal</h4>
+                    <p className="text-xs text-slate-500 font-medium leading-relaxed">
+                      Submit completed exercises, upload artifacts, and review your final assigned scores and qualitative markings.
+                    </p>
+                  </div>
+
+                  <div className="bg-white p-6 border border-slate-200 rounded-2xl shadow-sm space-y-3">
+                    <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl w-fit">
+                      <BookOpenCheck className="w-5 h-5" />
+                    </div>
+                    <h4 className="font-bold text-slate-900 text-sm">Study Notebooks</h4>
+                    <p className="text-xs text-slate-500 font-medium leading-relaxed">
+                      Take local notes during lectures with complete offline cache support. Entries sync seamlessly once you reconnect to the campus network.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* SECTION 3: TRIAL CREDENTIALS & ONE-CLICK TRIAL ACCESS */}
+            {showPublicSandbox && (
+              <section ref={trialRef} id="trials" className="py-16 px-6 bg-slate-100 animate-in fade-in slide-in-from-bottom-4 duration-300">
+              <div className="max-w-4xl mx-auto space-y-8">
+                <div className="text-center space-y-1">
+                  <h2 className="text-xs uppercase font-extrabold tracking-widest text-indigo-600">Workspace Sandbox</h2>
+                  <p className="text-2xl font-black text-slate-900 tracking-tight">Access Trials & Guest Credentials</p>
+                  <p className="text-xs text-slate-500 font-semibold max-w-sm mx-auto">
+                    Evaluate GDCMS immediately. Choose a pre-seeded account below to trigger instant one-click login trials.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+                  {/* Student Card */}
+                  <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col justify-between shadow-sm hover:shadow-md transition-all">
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
+                        <span className="text-[10px] uppercase font-black text-emerald-700 tracking-wider">Student Role</span>
+                      </div>
+                      <div className="space-y-1">
+                        <h4 className="font-black text-slate-900 text-base">Clement Koffie</h4>
+                        <p className="text-xs text-slate-500 font-semibold">Verify files library, submit coursework, and audit marked grade reviews.</p>
+                      </div>
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-150 space-y-1.5 text-xs text-slate-600 font-semibold">
+                        <p className="flex justify-between">
+                          <span className="text-slate-400 font-medium">Index Key:</span>
+                          <span className="text-slate-800 select-all">10928374</span>
+                        </p>
+                        <p className="flex justify-between text-[11px]">
+                          <span className="text-slate-400 font-medium font-bold">Email:</span>
+                          <span className="text-slate-850 select-all font-bold">koffieclement12@...</span>
+                        </p>
+                        <p className="flex justify-between text-[11px]">
+                          <span className="text-slate-400 font-medium">Password:</span>
+                          <span className="text-slate-500 font-bold">123456</span>
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleQuickLogin("10928374")}
+                      className="mt-6 w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black uppercase tracking-wider rounded-lg transition-colors cursor-pointer"
+                    >
+                      Instant Trial Student
+                    </button>
+                  </div>
+
+                  {/* Lecturer Card */}
+                  <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col justify-between shadow-sm hover:shadow-md transition-all">
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 bg-indigo-500 rounded-full"></span>
+                        <span className="text-[10px] uppercase font-black text-indigo-700 tracking-wider">Faculty Role</span>
+                      </div>
+                      <div className="space-y-1">
+                        <h4 className="font-black text-slate-900 text-base">Dr. Emmanuel Vance</h4>
+                        <p className="text-xs text-slate-500 font-semibold">Publish lecture outlines, structure coursework, and evaluate student hand-ins.</p>
+                      </div>
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-150 space-y-1.5 text-xs text-slate-600 font-semibold">
+                        <p className="flex justify-between">
+                          <span className="text-slate-400 font-medium">Faculty ID:</span>
+                          <span className="text-slate-800 select-all">L-9001</span>
+                        </p>
+                        <p className="flex justify-between">
+                          <span className="text-slate-400 font-medium font-bold">Email:</span>
+                          <span className="text-slate-850 select-all font-bold">emmanuel.vance@...</span>
+                        </p>
+                        <p className="flex justify-between text-[11px]">
+                          <span className="text-slate-400 font-medium">Password:</span>
+                          <span className="text-slate-500 font-bold">123456</span>
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleQuickLogin("L-9001")}
+                      className="mt-6 w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black uppercase tracking-wider rounded-lg transition-colors cursor-pointer"
+                    >
+                      Instant Trial Lecturer
+                    </button>
+                  </div>
+
+                  {/* Admin Card */}
+                  <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col justify-between shadow-sm hover:shadow-md transition-all">
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 bg-purple-500 rounded-full"></span>
+                        <span className="text-[10px] uppercase font-black text-purple-700 tracking-wider">Coordinator Role</span>
+                      </div>
+                      <div className="space-y-1">
+                        <h4 className="font-black text-slate-900 text-base">Admin Coordinator</h4>
+                        <p className="text-xs text-slate-500 font-semibold">Monitor classroom activity ledger reports, audit outlines, and review general grades.</p>
+                      </div>
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-150 space-y-1.5 text-xs text-slate-600 font-semibold">
+                        <p className="flex justify-between">
+                          <span className="text-slate-400 font-medium">Admin ID:</span>
+                          <span className="text-slate-800 select-all">A-0001</span>
+                        </p>
+                        <p className="flex justify-between">
+                          <span className="text-slate-400 font-medium font-bold">Email:</span>
+                          <span className="text-slate-850 select-all font-bold">admin@gdcms.edu</span>
+                        </p>
+                        <p className="flex justify-between text-[11px]">
+                          <span className="text-slate-400 font-medium">Password:</span>
+                          <span className="text-slate-500 font-bold">123456</span>
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleQuickLogin("A-0001")}
+                      className="mt-6 w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-black uppercase tracking-wider rounded-lg transition-colors cursor-pointer"
+                    >
+                      Instant Trial Coordinator
+                    </button>
+                  </div>
+
+                </div>
+              </div>
+            </section>
+            )}
+
+          </main>
+        )}
+
+        {/* SECURE DEDICATED AUTH VIEWS SECTION (LOGIN & SIGNUP OVERLAYS) */}
+        {authView !== "welcome" && (
+          <main className="flex-1 flex flex-col items-center justify-center p-6 bg-slate-100">
+            <div className="w-full max-w-md bg-white border border-slate-200 rounded-3xl p-8 shadow-xl space-y-6">
+              
+              {/* Branding and welcome title */}
+              <div className="text-center">
+                <div className="inline-flex items-center justify-center w-12 h-12 bg-indigo-600 text-white rounded-2xl mb-3 shadow-md shadow-indigo-600/10">
+                  <Layers className="w-6 h-6" />
+                </div>
+                <h2 className="text-2xl font-black text-slate-900 tracking-tight">
+                  {authView === "login" ? "Log In to GDCMS" : "Student Registration"}
+                </h2>
+                <p className="text-xs text-slate-500 font-medium mt-1">
+                  {authView === "login" 
+                    ? "Verify your credentials to enter the study portal." 
+                    : "Initialize your student profile coordinates below."}
+                </p>
+              </div>
+
+              {/* Error block */}
+              {authError && (
+                <div className="p-3 bg-rose-50 border border-rose-250 text-rose-700 text-xs rounded-xl font-bold flex items-start gap-2 animate-bounce">
+                  <span className="font-bold flex-shrink-0">✖</span>
+                  <span>{authError}</span>
+                </div>
+              )}
+
+              {/* Login / Signup Selector in Modal Header */}
+              <div className="flex bg-slate-100 p-1.5 rounded-xl border border-slate-205">
+                <button
+                  type="button"
+                  onClick={() => { setAuthView("login"); setAuthMode("login"); setAuthError(null); }}
+                  className={`flex-1 text-center py-2 rounded-lg text-xs font-bold cursor-pointer transition-all ${
+                    authView === "login" 
+                      ? "bg-white text-slate-900 shadow-sm" 
+                      : "text-slate-400 hover:text-slate-700"
+                  }`}
+                >
+                  Verify Index Login
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setAuthView("register"); setAuthMode("register"); setRole("student"); setAuthError(null); }}
+                  className={`flex-1 text-center py-2 rounded-lg text-xs font-bold cursor-pointer transition-all ${
+                    authView === "register" 
+                      ? "bg-white text-slate-900 shadow-sm" 
+                      : "text-slate-400 hover:text-slate-700"
+                  }`}
+                >
+                  Register Student Account
+                </button>
+              </div>
+
+              {/* Standard Credentials Input forms (scrubbed of security metrics) */}
+              <form onSubmit={authView === "login" ? handleLogin : handleRegister} className="space-y-4">
+                
+                {/* Identifier box */}
+                <div>
+                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1 tooltip" title="Students must supply their unique numeric Index number.">
+                    {authView === "login" ? "Faculty Email or Academic Index ID" : "Student Index ID Number"}
+                  </label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+                      <User className="w-4 h-4" />
+                    </span>
+                    <input
+                      type="text"
+                      required
+                      value={indexNumber}
+                      onChange={(e) => setIndexNumber(e.target.value)}
+                      placeholder={authView === "login" ? "e.g. 10928374 or doctor@gdcms.edu" : "e.g. 10928374"}
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white focus:outline-none rounded-xl py-3 pl-10 pr-4 text-xs font-semibold text-slate-800 placeholder:text-slate-400 transition-all"
+                    />
+                  </div>
+                </div>
+
+                {authView === "register" && (
+                  <>
+                    {/* Full Name */}
+                    <div>
+                      <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1">Full Name</label>
+                      <input
+                        type="text"
+                        required
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                        placeholder="e.g. Clement Koffie"
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white focus:outline-none rounded-xl py-3 px-4 text-xs font-semibold text-slate-800 placeholder:text-slate-400 transition-all"
+                      />
+                    </div>
+
+                    {/* Email */}
+                    <div>
+                      <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1">Institutional Email</label>
+                      <input
+                        type="email"
+                        required
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="e.g. student@school.edu"
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white focus:outline-none rounded-xl py-3 px-4 text-xs font-semibold text-slate-800 placeholder:text-slate-400 transition-all"
+                      />
+                    </div>
+                  </>
+                )}
+
+                {/* Password input */}
+                <div>
+                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1 font-bold">Account Access Password</label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+                      <Lock className="w-4 h-4" />
+                    </span>
+                    <input
+                      type="password"
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white focus:outline-none rounded-xl py-3 pl-10 pr-4 text-xs font-semibold text-slate-800 placeholder:text-slate-400 transition-all"
+                    />
+                  </div>
+                </div>
+
+                {/* Submit Trigger */}
+                <button
+                  type="submit"
+                  disabled={isLoadingUser}
+                  className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-805 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-indigo-600/10 cursor-pointer pointer-events-auto"
+                >
+                  {isLoadingUser ? "Authorizing Access..." : authView === "login" ? "Log In to Dashboard" : "Create Account"}
+                </button>
+              </form>
+
+              {/* Switch directions */}
+              <div className="text-center pt-2">
+                <button
+                  onClick={() => { setAuthView("welcome"); setAuthError(null); }}
+                  className="text-xs font-bold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
+                >
+                  ← Go back to Portal Information
+                </button>
+              </div>
+
+            </div>
+          </main>
+        )}
+
+        {/* Global sticky layout footer status indicators */}
+        <footer className="bg-white border-t border-slate-200 px-6 py-4 flex flex-col md:flex-row items-center justify-between text-[11px] text-slate-400 shrink-0 gap-2">
+          <div>
+            <span>Group D Class Management System (GDCMS) • All Rights Reserved &copy; 2026</span>
+          </div>
+          <div className="flex items-center space-x-3 font-semibold">
+            <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded uppercase">Verified Study Guild</span>
+            <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded uppercase">● Sync Stable</span>
+          </div>
+        </footer>
+
+      </div>
+    );
+  }
+
+  // ---------------------------------------------------------
+  // ---------------------------------------------------------
+  // RENDER DYNAMIC SCHOOL CLASS WEBAPP (Dashboard Interface)
+  // ---------------------------------------------------------
+  return (
+    <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-800 flex flex-col lg:flex-row shadow-2xl overflow-x-hidden selection:bg-indigo-600 selection:text-white">
+      
+      {/* Mobile & Tablet Top Navbar Header Bar */}
+      <div className="lg:hidden flex items-center justify-between bg-slate-900 border-b border-slate-800 text-white px-5 h-16 shrink-0 z-40 sticky top-0">
+        <div className="flex items-center space-x-2.5">
+          <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center font-black text-sm">
+            {appConfig.systemShort ? appConfig.systemShort.charAt(0) : "G"}
+          </div>
+          <span className="text-sm font-black uppercase tracking-tight">{appConfig.systemShort} Core</span>
+        </div>
+        
+        <div className="flex items-center gap-2">
+          {/* Notifications feed directly in header on mobile/tablet screen! */}
+          <NotificationBell 
+            token={token} 
+            notifications={notifications} 
+            onRefresh={() => fetchAppData(token!)}
+            onSelectTab={(tab) => {
+              setActiveTab(tab);
+              setIsMobileMenuOpen(false);
+            }} 
+          />
+          
+          <button
+            type="button"
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-300 focus:outline-none cursor-pointer"
+          >
+            {isMobileMenuOpen ? <X className="w-5 h-5 text-white" /> : <Menu className="w-5 h-5 text-white" />}
+          </button>
+        </div>
+      </div>
+
+      {/* Mobile/Tablet Sidebar Navigation Back Backdrop Overlay */}
+      {isMobileMenuOpen && (
+        <div 
+          onClick={() => setIsMobileMenuOpen(false)}
+          className="fixed inset-0 bg-black/60 z-40 lg:hidden animate-fade-in pointer-events-auto"
+        />
+      )}
+
+      {/* Sidebar navigation panel */}
+      <aside className={`
+        fixed inset-y-0 left-0 w-64 z-50 lg:z-10 flex flex-col h-screen ${sideTheme.aside} border-r ${sideTheme.border} transform transition-transform duration-300 ease-out lg:sticky lg:top-0 lg:h-screen lg:translate-x-0 lg:w-64 lg:flex lg:flex-col
+        ${isMobileMenuOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
+      `}>
+        
+        {/* Sidebar Header Brand / Title logo */}
+        <div className={`p-6 flex items-center justify-between border-b ${sideTheme.border}`}>
+          <div className="flex items-center space-x-3">
+            <div className={`w-9 h-9 ${themeTheme.primary} rounded-xl flex items-center justify-center font-black ${themeTheme.shadow}`}>
+              {appConfig.systemShort ? appConfig.systemShort.charAt(0) : "G"}
+            </div>
+            <div className="flex flex-col">
+              <span className="text-sm font-black tracking-tight uppercase">{appConfig.systemShort} Core</span>
+              <span className="text-[9px] opacity-75 capitalize tracking-tighter">Class Management Portal</span>
+            </div>
+          </div>
+          <span className={`text-[10px] ${sideTheme.badge} px-2 py-0.5 rounded-full font-bold`}>ITN-GD</span>
+        </div>
+
+        {/* Dynamic Connected User status display badge */}
+        <div className={`p-5 border-b ${sideTheme.border} bg-black/10`}>
+          <p className="text-[10px] opacity-50 uppercase tracking-wider font-extrabold mb-1">Authenticated Account</p>
+          <div className="flex items-center gap-2">
+            <div className={`w-8 h-8 rounded-full ${sideTheme.badge} flex items-center justify-center text-xs font-bold`}>
+              {currentUser?.fullName.substring(0, 2).toUpperCase()}
+            </div>
+            <div className="min-w-0 text-left">
+              <p className="text-xs font-bold truncate leading-tight">{currentUser?.fullName}</p>
+              <p className="text-[10px] opacity-60 truncate tracking-tight">{currentUser?.email}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Navigation list */}
+        <nav className="flex-1 px-4 py-5 space-y-1 overflow-y-auto">
+          <button
+            onClick={() => { setActiveTab("dashboard"); setIsMobileMenuOpen(false); }}
+            className={`w-full p-3 rounded-xl flex items-center space-x-3 text-xs font-semibold cursor-pointer transition-all ${
+              activeTab === "dashboard"
+                ? sideTheme.itemActive
+                : sideTheme.itemInactive
+            }`}
+          >
+            <Layers className="w-4 h-4" />
+            <span>Overview Dashboard</span>
+          </button>
+
+          <button
+            onClick={() => { setActiveTab("materials"); setIsMobileMenuOpen(false); }}
+            className={`w-full p-3 rounded-xl flex items-center space-x-3 text-xs font-semibold cursor-pointer transition-all ${
+              activeTab === "materials"
+                ? sideTheme.itemActive
+                : sideTheme.itemInactive
+            }`}
+          >
+            <BookOpen className="w-4 h-4" />
+            <span>{appConfig.materialsTerm || "Course Materials"}</span>
+          </button>
+
+          <button
+            onClick={() => { setActiveTab("assignments"); setIsMobileMenuOpen(false); }}
+            className={`w-full p-3 rounded-xl flex items-center space-x-3 text-xs font-semibold cursor-pointer transition-all ${
+              activeTab === "assignments"
+                ? sideTheme.itemActive
+                : sideTheme.itemInactive
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            <span>{appConfig.assignmentsTerm || "Assignments & Marking"}</span>
+          </button>
+
+          <button
+            onClick={() => { setActiveTab("notes"); setIsMobileMenuOpen(false); }}
+            disabled={currentUser?.role === "lecturer" ? true : false}
+            className={`w-full p-3 rounded-xl flex items-center space-x-3 text-xs font-semibold cursor-pointer transition-all ${
+              currentUser?.role === "lecturer"
+                ? "opacity-40 cursor-not-allowed hidden"
+                : activeTab === "notes"
+                  ? sideTheme.itemActive
+                  : sideTheme.itemInactive
+            }`}
+          >
+            <BookOpenCheck className="w-4 h-4" />
+            <span>Personal Studies Notes</span>
+          </button>
+
+          <button
+            onClick={() => { setActiveTab("security"); setIsMobileMenuOpen(false); }}
+            className={`w-full p-3 rounded-xl flex items-center space-x-3 text-xs font-semibold cursor-pointer transition-all ${
+              activeTab === "security"
+                ? sideTheme.itemActive
+                : sideTheme.itemInactive
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4" />
+            <span>System Guidelines</span>
+          </button>
+        </nav>
+
+        {/* Classroom indicator on the footer bottom of the rail */}
+        <div className={`p-4 m-4 rounded-xl border ${sideTheme.border} ${sideTheme.subCard}`}>
+          <p className="text-[10px] opacity-60 uppercase tracking-widest font-extrabold mb-1.5">{appConfig.systemShort} CLASS</p>
+          <div className="flex items-center text-[11px] text-emerald-500 space-x-2 font-bold justify-start">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span className="truncate">{appConfig.systemShort} Active Live</span>
+          </div>
+          <button
+            onClick={() => { handleSignOut(); setIsMobileMenuOpen(false); }}
+            className="mt-4 w-full py-2.5 bg-black/20 hover:bg-rose-600 text-slate-300 hover:text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Sign Out</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* Main viewport Container node */}
+      <div className="flex-1 flex flex-col min-w-0">
+        
+        {/* Offline sync / online indicators wrapper */}
+        <OfflineIndicator token={token} onSyncSuccess={() => fetchAppData(token!)} />
+
+        {/* Top bar header */}
+        <header className="bg-white/95 backdrop-blur-md border-b border-slate-200/85 px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-4 z-30 shrink-0 sticky top-16 lg:top-0 shadow-sm animate-fade-in">
+          
+          {/* Global filter searches */}
+          <div className="flex items-center bg-slate-100 rounded-full px-4 py-2 w-full sm:w-80 border border-slate-200 focus-within:border-indigo-500 focus-within:bg-white transition-all">
+            <Search className="w-4 h-4 text-slate-400 shrink-0" />
+            <input
+              type="text"
+              placeholder="Search and locate materials, notes..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="bg-transparent border-none focus:outline-none focus:ring-0 text-xs w-full ml-2 text-slate-700"
+            />
+          </div>
+
+          {/* User notifications feed indicators + index identities panel */}
+          <div className="flex items-center justify-end space-x-4 w-full sm:w-auto shrink-0">
+            
+            {/* Real Push Notification Bell */}
+            <div className="hidden lg:block">
+              <NotificationBell token={token} notifications={notifications} onRefresh={() => fetchAppData(token!)} />
+            </div>
+
+            {/* User profile capsule card */}
+            <div className="flex items-center space-x-3 border-l border-slate-200 pl-4">
+              <div className="text-right">
+                <p className="text-xs font-bold text-slate-800">{currentUser?.fullName}</p>
+                <p className="text-[9px] text-slate-400 uppercase tracking-widest font-bold">
+                  {currentUser?.role === "lecturer" ? "L-ID: Faculty" : `ID: ${currentUser?.indexNumber}`}
+                </p>
+              </div>
+              <div className="w-9 h-9 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-700 font-extrabold border border-indigo-100 uppercase sm:text-xs text-[10px]">
+                {currentUser?.fullName.substring(0, 2).toUpperCase()}
+              </div>
+            </div>
+
+          </div>
+        </header>
+
+        {/* Content canvas scrolling wrapper */}
+        <main className="flex-1 p-6 overflow-y-auto">
+          
+          {/* TAB 1: OVERVIEW DASHBOARD */}
+          {activeTab === "dashboard" && (
+            <div className="space-y-6">
+              
+              {/* ROLE A: STUDENT OVERVIEW DASHBOARD */}
+              {currentUser?.role === "student" && (
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-fade-in">
+                  
+                  {/* Semester Circular Progress Board */}
+                  <div className="lg:col-span-8 bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80 flex flex-col md:flex-row items-center justify-between gap-6">
+                    <div className="flex-1 space-y-4">
+                      <div>
+                        <span className="bg-indigo-50 text-indigo-700 font-bold text-[10px] uppercase tracking-widest px-3 py-1 rounded-full">
+                          Welcome to {appConfig.systemShort || "GDCMS"} Core
+                        </span>
+                        <h2 className="text-2xl font-black text-slate-900 mt-2">Class portal state summary</h2>
+                        <p className="text-slate-500 text-xs sm:text-sm">
+                          AES-256 standard symmetric shields are active. Offline documents and homework logs are synchronized.
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-6 pt-2">
+                        <div className="border border-slate-100 bg-slate-50/50 rounded-2xl p-4 min-w-32">
+                          <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Aggregate GPA</p>
+                          <p className="text-xl font-black text-slate-800 mt-0.5">3.82</p>
+                        </div>
+                        <div className="border border-slate-100 bg-slate-50/50 rounded-2xl p-4 min-w-32">
+                          <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Active Credits</p>
+                          <p className="text-xl font-black text-slate-800 mt-0.5">18 / 21 GP</p>
+                        </div>
+                        <div className="border border-slate-100 bg-slate-50/50 rounded-2xl p-4 min-w-32">
+                          <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Attendance State</p>
+                          <p className="text-xl font-black text-emerald-600 mt-0.5">94% verified</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* SVG Circular Radial Progress */}
+                    <div className="w-36 h-36 relative flex items-center justify-center shrink-0">
+                      <svg className="w-full h-full transform -rotate-90">
+                        <circle cx="72" cy="72" r="62" stroke="#F1F5F9" strokeWidth="12" fill="transparent" />
+                        <circle 
+                          cx="72" 
+                          cy="72" 
+                          r="62" 
+                          stroke="#4F46E5" 
+                          strokeWidth="12" 
+                          fill="transparent" 
+                          strokeDasharray="389.5" 
+                          strokeDashoffset={389.5 - (389.5 * totalProgressPercentage / 100)} 
+                        />
+                      </svg>
+                      <div className="absolute text-center">
+                        <span className="text-xl font-black text-indigo-600 block">{totalProgressPercentage}%</span>
+                        <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold block">Assessed State</span>
+                      </div>
+                    </div>
+
+                  </div>
+
+                  {/* Assignments / Grade feed status sidebar */}
+                  <div className="lg:col-span-4 bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80 flex flex-col gap-4">
+                    <h3 className="font-bold text-sm text-slate-800 flex items-center gap-2">
+                      <CheckSquare className="w-4 h-4 text-indigo-500" />
+                      <span>Immediate Academic Priorities</span>
+                    </h3>
+
+                    <div className="flex-1 space-y-4 font-sans">
+                      {filteredMaterials.filter(m => m.type === "assignment_prompt").length === 0 ? (
+                        <div className="text-center py-8 text-slate-400 text-xs">
+                          No active {appConfig.assignmentsTerm || "assignments"} found.
+                        </div>
+                      ) : (
+                        filteredMaterials.filter(m => m.type === "assignment_prompt").slice(0, 3).map(asg => {
+                          const submissionItem = studentSubmissionsMap[asg.id];
+                          return (
+                            <div key={asg.id} className="relative pl-6 border-l-2 border-indigo-500/30">
+                              <div className="absolute left-[-5px] top-1 w-2.5 h-2.5 bg-indigo-600 rounded-full"></div>
+                              <p className="text-[9px] text-slate-400 uppercase tracking-tight font-black">
+                                {new Date(asg.uploadedAt).toLocaleDateString()}
+                              </p>
+                              <p className="text-xs font-semibold text-slate-800 truncate" title={asg.title}>
+                                {asg.title}
+                              </p>
+                              
+                              <div className="mt-2.5 flex items-center justify-between text-[10px]">
+                                {submissionItem ? (
+                                  submissionItem.status === "graded" ? (
+                                    <span className="bg-emerald-50 text-emerald-700 font-bold px-2 py-0.5 rounded border border-emerald-100">
+                                      Graded: {submissionItem.grade}
+                                    </span>
+                                  ) : (
+                                    <span className="bg-amber-50 text-amber-700 font-medium px-2 py-0.5 rounded border border-amber-100">
+                                      Under Review
+                                    </span>
+                                  )
+                                ) : (
+                                  <span className="bg-rose-50 text-rose-700 font-semibold px-2 py-0.5 rounded border border-rose-100">
+                                    Not Handed In
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    <div className="mt-2 pt-2 border-t border-slate-100 text-center">
+                      <button 
+                        onClick={() => setActiveTab("assignments")} 
+                        className="text-indigo-600 hover:text-indigo-700 text-xs font-bold inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <span>Inspect Handin Interface</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Bottom Half grid row: Materials & Personal Crypt Notes brief lists */}
+                  <div className="lg:col-span-6 bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="font-extrabold text-sm text-slate-800">{appConfig.materialsTerm || "Course Materials"} Area</h3>
+                      <button onClick={() => setActiveTab("materials")} className="text-xs text-indigo-600 font-bold cursor-pointer">
+                        Browse All
+                      </button>
+                    </div>
+
+                    <div className="space-y-3">
+                      {filteredMaterials.length === 0 ? (
+                        <div className="text-center py-10 text-slate-400 text-xs font-medium">
+                          No lecture files found matching search filters.
+                        </div>
+                      ) : (
+                        filteredMaterials.slice(0, 3).map(mat => (
+                          <div key={mat.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                                <BookOpen className="w-4 h-4" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-xs font-bold text-slate-800 truncate">{mat.title}</p>
+                                <p className="text-[10px] text-slate-400 truncate">{mat.uploadedBy} • {new Date(mat.uploadedAt).toLocaleDateString()}</p>
+                              </div>
+                            </div>
+                            <a
+                              href={`/api/materials/download/${mat.id}`}
+                              download={mat.originalName}
+                              className="p-2 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-xl cursor-pointer"
+                              title="Decrypt & Save to Storage"
+                            >
+                              <Download className="w-4 h-4" />
+                            </a>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Personal notes brief lists */}
+                  <div className="lg:col-span-6 bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="font-extrabold text-sm text-slate-800">My Studies Notebook</h3>
+                      <button onClick={() => setActiveTab("notes")} className="text-xs text-indigo-600 font-bold cursor-pointer">
+                        Open Sandbox Notebook
+                      </button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {filteredNotes.length === 0 ? (
+                        <div className="text-center py-10 text-slate-400 text-xs font-medium">
+                          No private studies records matched query filters.
+                        </div>
+                      ) : (
+                        filteredNotes.slice(0, 3).map(note => (
+                          <div 
+                            key={note.id} 
+                            className={`pointer-events-auto cursor-pointer p-4 rounded-2xl border transition-all ${
+                              !note.isSynced 
+                                ? "bg-amber-50/50 border-amber-200" 
+                                : "bg-indigo-50/30 border-indigo-100"
+                            }`}
+                            onClick={() => {
+                              setActiveTab("notes");
+                              setEditingNoteId(note.id);
+                              setNoteTitle(note.title);
+                              setNoteContent(note.content);
+                            }}
+                          >
+                            <div className="flex items-center justify-between">
+                              <p className="text-xs font-bold text-slate-800">{note.title}</p>
+                              {!note.isSynced ? (
+                                <span className="text-[9px] bg-amber-600 text-white px-2 py-0.5 rounded font-bold animate-pulse">
+                                  Offline Cache
+                                </span>
+                              ) : (
+                                <span className="text-[9px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-bold">
+                                  AES Secure
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-slate-500 mt-1 truncate">{note.content}</p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                </div>
+              )}
+
+              {/* ROLE B: LECTURER PORTAL DASHBOARD (ASSESSMENT MATRIX CONSOLE) */}
+              {currentUser?.role === "lecturer" && (
+                <div className="space-y-6 animate-fade-in">
+                  
+                  {/* Performance Statistics Overview Block */}
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+                      <div>
+                        <p className="text-[10px] text-slate-400 uppercase font-black tracking-wider">Cohort Size</p>
+                        <p className="text-2xl font-black text-slate-800 mt-1">2 Registered</p>
+                      </div>
+                      <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl">
+                        <Users className="w-5 h-5" />
+                      </div>
+                    </div>
+                    
+                    <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+                      <div>
+                        <p className="text-[10px] text-slate-400 uppercase font-black tracking-wider">Cohort Target Average</p>
+                        <p className="text-2xl font-black text-indigo-600 mt-1">81.5%</p>
+                      </div>
+                      <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl">
+                        <Trophy className="w-5 h-5" />
+                      </div>
+                    </div>
+
+                    <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+                      <div>
+                        <p className="text-[10px] text-slate-400 uppercase font-black tracking-wider">Interactive Syllabus Count</p>
+                        <p className="text-2xl font-black text-slate-800 mt-1">{materials.length} Entries</p>
+                      </div>
+                      <div className="p-3 bg-cyan-50 text-cyan-600 rounded-2xl">
+                        <BookOpen className="w-5 h-5" />
+                      </div>
+                    </div>
+
+                    <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+                      <div>
+                        <p className="text-[10px] text-slate-400 uppercase font-black tracking-wider">Outstanding Submissions</p>
+                        <p className="text-2xl font-black text-amber-600 mt-1">{Math.max(0, 2 - submissions.length)} Pending</p>
+                      </div>
+                      <div className="p-3 bg-amber-50 text-amber-600 rounded-2xl animate-pulse">
+                        <Activity className="w-5 h-5" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Faculty Member Greetings Board */}
+                  <div className="bg-indigo-950 text-white rounded-3xl p-6 relative overflow-hidden shadow-sm">
+                    <div className="absolute right-0 bottom-0 top-0 opacity-10 pointer-events-none">
+                      <svg className="w-96 h-full text-white" fill="currentColor" viewBox="0 0 100 100">
+                        <polygon points="50,15 100,100 0,100" />
+                      </svg>
+                    </div>
+                    <div className="space-y-1.5 relative z-10">
+                      <span className="bg-indigo-800 text-indigo-200 font-bold text-[10px] uppercase tracking-widest px-3 py-1 rounded-full">
+                        Faculty Administration Centre
+                      </span>
+                      <h2 className="text-xl font-bold mt-1.5">Configure, track and edit individual academic performances</h2>
+                      <p className="text-indigo-200 text-xs max-w-2xl font-medium">
+                        Change student marks for Assignments, Classroom Quizzes, and Mid-semester examinations. The aggregate GP and verified rankings recalculate in real-time.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* INDIVIDUAL PERFORMANCE GRADES & MARKS LIST GRID */}
+                  <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm">
+                    <div className="flex items-center justify-between mb-5">
+                      <div>
+                        <h3 className="font-extrabold text-sm text-slate-800 flex items-center gap-2">
+                          <CheckSquare className="w-4 h-4 text-emerald-500" />
+                          <span>Student Grade Matrix & Performance (Assignments, Quizzes, Midsems)</span>
+                        </h3>
+                        <p className="text-[11px] text-slate-400 font-medium">Lecturers update performance records interactively onto the local database state container below.</p>
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto rounded-2xl border border-slate-100">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="bg-slate-50 text-slate-500 font-extrabold border-b border-slate-100 uppercase tracking-wider text-[9px]">
+                            <th className="p-4">Student Card</th>
+                            <th className="p-4">Index ID</th>
+                            <th className="p-4 bg-indigo-50/30 text-indigo-950">Assignments (25%)</th>
+                            <th className="p-4">Quizzes (15%)</th>
+                            <th className="p-4">Mid-Semester Exam (30%)</th>
+                            <th className="p-4 text-center">Progress Status</th>
+                            <th className="p-4 text-center">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                          {studentPerformance.map(student => {
+                            const isEditing = editingStudentId === student.id;
+                            return (
+                              <tr key={student.id} className="hover:bg-slate-50/50 transition-colors">
+                                {/* Student avatar details */}
+                                <td className="p-4">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-700 text-[10px] uppercase border">
+                                      {student.name.substring(0, 2)}
+                                    </div>
+                                    <div>
+                                      <p className="font-bold text-slate-900">{student.name}</p>
+                                      <p className="text-[9px] text-slate-400">Class Year 3</p>
+                                    </div>
+                                  </div>
+                                </td>
+                                
+                                {/* index identification */}
+                                <td className="p-4 font-mono text-[11px] font-semibold text-slate-500">
+                                  {student.index}
+                                </td>
+
+                                {/* Assignments score */}
+                                <td className="p-4 bg-indigo-50/10 font-bold">
+                                  {isEditing ? (
+                                    <input 
+                                      type="number"
+                                      value={editAsgGrade}
+                                      onChange={(e) => setEditAsgGrade(Number(e.target.value))}
+                                      placeholder="0"
+                                      className="w-16 bg-white border rounded py-1 px-1 text-xs text-slate-850"
+                                    />
+                                  ) : (
+                                    <span className="text-slate-900">{student.assignmentGrade}%</span>
+                                  )}
+                                </td>
+
+                                {/* Quiz score */}
+                                <td className="p-4">
+                                  {isEditing ? (
+                                    <input 
+                                      type="number"
+                                      value={editQuizGrade}
+                                      onChange={(e) => setEditQuizGrade(Number(e.target.value))}
+                                      placeholder="0"
+                                      className="w-16 bg-white border rounded py-1 px-1 text-xs text-slate-850"
+                                    />
+                                  ) : (
+                                    <span className="text-slate-850">{student.quizGrade}%</span>
+                                  )}
+                                </td>
+
+                                {/* Midsem grade */}
+                                <td className="p-4">
+                                  {isEditing ? (
+                                    <input 
+                                      type="number"
+                                      value={editMidsemGrade}
+                                      onChange={(e) => setEditMidsemGrade(Number(e.target.value))}
+                                      placeholder="0"
+                                      className="w-16 bg-white border rounded py-1 px-1 text-xs text-slate-850"
+                                    />
+                                  ) : (
+                                    <span className="text-slate-850">{student.midsemGrade}%</span>
+                                  )}
+                                </td>
+
+                                {/* Rating indicator badge */}
+                                <td className="p-4 text-center">
+                                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold ${
+                                    student.progressStatus === "Excellent" 
+                                      ? "bg-emerald-50 text-emerald-700 border border-emerald-100" 
+                                      : "bg-indigo-50 text-indigo-700 border border-indigo-100"
+                                  }`}>
+                                    {student.progressStatus}
+                                  </span>
+                                </td>
+
+                                {/* inline submission evaluation trigger actions */}
+                                <td className="p-4 text-center">
+                                  {isEditing ? (
+                                    <div className="flex items-center justify-center gap-2">
+                                      <button
+                                        onClick={() => {
+                                          setStudentPerformance(prev => prev.map(stud => {
+                                            if (stud.id === student.id) {
+                                              let status = "Average";
+                                              const aggregate = (editAsgGrade * 0.25) + (editQuizGrade * 0.15) + (editMidsemGrade * 0.3) + 20;
+                                              if (aggregate >= 80) status = "Excellent";
+                                              else if (aggregate >= 70) status = "Consistent";
+                                              return {
+                                                ...stud,
+                                                assignmentGrade: editAsgGrade,
+                                                quizGrade: editQuizGrade,
+                                                midsemGrade: editMidsemGrade,
+                                                progressStatus: status
+                                              };
+                                            }
+                                            return stud;
+                                          }));
+                                          setEditingStudentId(null);
+                                        }}
+                                        className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold cursor-pointer"
+                                      >
+                                        Save
+                                      </button>
+                                      <button
+                                        onClick={() => setEditingStudentId(null)}
+                                        className="px-2 py-1 bg-slate-200 hover:bg-slate-350 text-slate-700 rounded text-[10px] font-bold cursor-pointer"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      onClick={() => {
+                                        setEditingStudentId(student.id);
+                                        setEditAsgGrade(student.assignmentGrade);
+                                        setEditQuizGrade(student.quizGrade);
+                                        setEditMidsemGrade(student.midsemGrade);
+                                      }}
+                                      className="px-3 py-1 text-xs text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 font-bold rounded-lg transition-colors cursor-pointer"
+                                    >
+                                      Update Marks
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                </div>
+              )}
+
+              {/* ROLE C: ADMIN PRIVILEGE PANEL (SYSTEM DESIGN CONFIG INTERFACE) */}
+              {currentUser?.role === "admin" && (
+                <div className="space-y-6 animate-fade-in">
+                  
+                  {/* Separation of Concerns Protection Warning */}
+                  <div className="bg-amber-50/60 border border-amber-200/80 p-5 rounded-3xl flex items-start gap-4">
+                    <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="text-xs">
+                      <p className="font-black text-amber-950 uppercase tracking-wide text-[10px]">Academic Data Isolation Active</p>
+                      <p className="text-amber-800 mt-1 font-medium leading-relaxed">
+                        To guarantee absolute student record privacy compliance, Administrators are strictly locked out from modifying cohort academic data (assignment scripts, quizzes, examinations, or grade transcripts). You may adjust nomenclature variables and deploy server builds in the control centers below.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+                    
+                    {/* COLUMN 1: LIVE REBRANDING SYSTEM RESTRENGTHENING (span-8) */}
+                    <div className="xl:col-span-8 bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-6">
+                      <div className="space-y-1 border-b pb-3 border-slate-100 flex items-center justify-between">
+                        <div>
+                          <span className={`${themeTheme.primary} text-[10px] px-2 py-0.5 rounded font-black uppercase tracking-wider`}>
+                            Brand & Look-And-Feel System Restructure
+                          </span>
+                          <h3 className="text-base font-black text-slate-900 mt-1 flex items-center gap-1.5">
+                            <Palette className="w-4.5 h-4.5 text-indigo-600" />
+                            <span>Portal Core Rebranding Matrix</span>
+                          </h3>
+                        </div>
+                        <span className="text-[10px] bg-slate-100 text-slate-500 font-extrabold uppercase px-2 py-1 rounded-xl">Active Restructure</span>
+                      </div>
+
+                      <div className="space-y-4 text-xs">
+                        {/* Nomenclature terminology definitions inputs */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 text-left">
+                              Short Acronym Acronym Name
+                            </label>
+                            <input 
+                              type="text"
+                              value={appConfig.systemShort}
+                              onChange={(e) => setAppConfig(prev => ({ ...prev, systemShort: e.target.value }))}
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white focus:outline-none rounded-xl py-2 px-3 text-slate-800 font-bold"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 text-left">
+                              Full Extended System Name
+                            </label>
+                            <input 
+                              type="text"
+                              value={appConfig.systemName}
+                              onChange={(e) => setAppConfig(prev => ({ ...prev, systemName: e.target.value }))}
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white focus:outline-none rounded-xl py-2 px-3 text-slate-800 font-semibold"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 text-left">
+                              Assignments Interface Tab Customized Label
+                            </label>
+                            <input 
+                              type="text"
+                              value={appConfig.assignmentsTerm}
+                              onChange={(e) => setAppConfig(prev => ({ ...prev, assignmentsTerm: e.target.value }))}
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white focus:outline-none rounded-xl py-2 px-3 text-slate-800 font-semibold"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 text-left">
+                              Materials Interface Area Customized Label
+                            </label>
+                            <input 
+                              type="text"
+                              value={appConfig.materialsTerm}
+                              onChange={(e) => setAppConfig(prev => ({ ...prev, materialsTerm: e.target.value }))}
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white focus:outline-none rounded-xl py-2 px-3 text-slate-800 font-semibold"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Theme Preset and Sidebar Preset select boards */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+                          <div>
+                            <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 text-left">
+                              Theme Accent Color
+                            </label>
+                            <select
+                              value={appConfig.themeColor || "indigo"}
+                              onChange={(e) => setAppConfig(prev => ({ ...prev, themeColor: e.target.value }))}
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:outline-none rounded-xl py-2.5 px-3 text-xs text-slate-800 font-bold"
+                            >
+                              <option value="indigo">Indigo Corporate (Default)</option>
+                              <option value="emerald">Emerald Forest Calm</option>
+                              <option value="rose">Rose Velvet Elegant</option>
+                              <option value="violet">Violet Electric Tech</option>
+                              <option value="amber">Amber Harvest Warm</option>
+                              <option value="blue">Blue Sky Air</option>
+                              <option value="slate">Slate Minimal Industrial</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 text-left">
+                              Sidebar Rail Theme Presets
+                            </label>
+                            <select
+                              value={appConfig.sidebarStyle || "dark-navy"}
+                              onChange={(e) => setAppConfig(prev => ({ ...prev, sidebarStyle: e.target.value }))}
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:outline-none rounded-xl py-2.5 px-3 text-xs text-slate-800 font-bold"
+                            >
+                              <option value="dark-navy">Dark Slate Navy (Default)</option>
+                              <option value="indigo-accent">Connected Indigo Accent</option>
+                              <option value="slate-minimal">Slate Minimal Light</option>
+                              <option value="emerald-forest">Emerald Jungle Deep</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 text-left">
+                              Global Font Size preset
+                            </label>
+                            <select
+                              value={appConfig.fontSizePreset || "standard"}
+                              onChange={(e) => setAppConfig(prev => ({ ...prev, fontSizePreset: e.target.value }))}
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:outline-none rounded-xl py-2.5 px-3 text-xs text-slate-800 font-bold"
+                            >
+                              <option value="compact">Compact Dense typography</option>
+                              <option value="standard">Standard balanced (Default)</option>
+                              <option value="large">Spacious Readable font</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Sandbox mode toggle controller relocated from public login view */}
+                        <div className="bg-slate-50 border p-4 rounded-2xl flex items-center justify-between gap-4 mt-2">
+                          <div className="text-left">
+                            <h4 className="font-bold text-slate-800 text-xs">Sandbox Helper Mode toggler</h4>
+                            <p className="text-[10px] text-slate-400 font-medium">Render public mock-login trial users helper cards on landing page for verification.</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const nextVal = !appConfig.sandboxModeEnabled;
+                              setAppConfig(prev => ({ ...prev, sandboxModeEnabled: nextVal }));
+                              setShowPublicSandbox(nextVal);
+                            }}
+                            className={`px-4 py-2 font-black tracking-wider rounded-xl uppercase text-[10px] transition-all cursor-pointer ${
+                              appConfig.sandboxModeEnabled !== false
+                                ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                                : "bg-slate-200 hover:bg-slate-300 text-slate-600"
+                            }`}
+                          >
+                            Sandbox cards: {appConfig.sandboxModeEnabled !== false ? "SHOWN" : "HIDDEN"}
+                          </button>
+                        </div>
+
+                        {/* Live rebrand save and push button */}
+                        <div className="pt-2 flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => handleSaveAppConfigOnServer(appConfig)}
+                            className={`py-3 px-6 rounded-xl font-bold text-xs uppercase tracking-widest transition-colors cursor-pointer text-white ${themeTheme.primary}`}
+                          >
+                            Restructure & Rebrand System Live
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* COLUMN 2: ADVISORY ALERT NOTIFICATION BROADCASTER (span-4) */}
+                    <div className="xl:col-span-4 bg-white rounded-3xl p-6 border border-slate-200 shadow-sm flex flex-col justify-between gap-4">
+                      <div className="space-y-1">
+                        <span className="text-[10px] bg-red-50 text-red-700 px-2 py-0.5 rounded font-black uppercase tracking-wider">
+                          Official Emergency Alert Advisor
+                        </span>
+                        <h3 className="text-base font-black text-slate-900 mt-1.5 flex items-center gap-1.5">
+                          <ShieldAlert className="w-4.5 h-4.5 text-rose-600" />
+                          <span>Emergency Broadcasting Terminal</span>
+                        </h3>
+                        <p className="text-[11px] text-slate-400 font-medium text-left">Deploy instant warning and notification popups on student/lecturer bells for anomalous acts.</p>
+                      </div>
+
+                      <form onSubmit={handleBroadcastAlert} className="space-y-4 pt-1 flex-1 flex flex-col justify-between">
+                        <div className="space-y-3">
+                          <div>
+                            <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 text-left">
+                              Target Audience Group
+                            </label>
+                            <select
+                              value={alertTarget}
+                              onChange={(e) => setAlertTarget(e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-200 focus:outline-none rounded-xl py-2 px-3 text-xs text-slate-800 font-semibold"
+                            >
+                              <option value="all">All Direct Participants (Students & Lecturers)</option>
+                              <option value="student">Students portal exclusively</option>
+                              <option value="lecturer">Lecturers grid exclusively</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 text-left">
+                              Advisory Warning Title
+                            </label>
+                            <input
+                              type="text"
+                              value={alertTitle}
+                              onChange={(e) => setAlertTitle(e.target.value)}
+                              placeholder="e.g. Administrative Audit Watch / Security Advice"
+                              className="w-full bg-slate-50 border border-slate-200 focus:outline-none rounded-xl py-2 px-3 text-xs text-slate-850 font-bold"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1 text-left">
+                              Advice / Warning Body message
+                            </label>
+                            <textarea
+                              value={alertMessage}
+                              onChange={(e) => setAlertMessage(e.target.value)}
+                              placeholder="Write warning memo details concerning unusual class uploads or platform behaviors..."
+                              rows={4}
+                              className="w-full bg-slate-50 border border-slate-200 focus:outline-none rounded-xl py-2.5 px-3 text-xs text-slate-700 font-semibold resize-none"
+                            />
+                          </div>
+                        </div>
+
+                        <button
+                          type="submit"
+                          disabled={isBroadcastingAlert}
+                          className="w-full py-3 bg-slate-900 hover:bg-rose-600 text-white font-extrabold rounded-xl text-xs uppercase tracking-widest transition-colors disabled:opacity-40 flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                          {isBroadcastingAlert ? (
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          ) : (
+                            <span>Broadcast Alert Notification Now</span>
+                          )}
+                        </button>
+                      </form>
+                    </div>
+
+                  </div>
+
+                  {/* COLUMN 3: REAL-TIME INDEPENDENT SECURITY AUDIT TRAIL LOGS (Successful and Failed attempts) */}
+                  <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b pb-3 border-slate-105 border-slate-100 gap-4">
+                      <div>
+                        <span className="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-black uppercase tracking-wider">
+                          Cryptographic Security logs
+                        </span>
+                        <h3 className="text-base font-black text-slate-900 mt-1 flex items-center gap-1.5 justify-start">
+                          <Lock className="w-4.5 h-4.5 text-slate-800" />
+                          <span>Login Authentication Security Audit Log Trail</span>
+                        </h3>
+                        <p className="text-[11px] text-slate-400 font-medium text-left">Aggregated successful credentials matches and hashes checking attempts on active nodes.</p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={fetchAuthLogs}
+                          className="px-4 py-2 border rounded-xl hover:bg-slate-50 text-slate-650 font-bold text-xs uppercase tracking-tight flex items-center gap-1 cursor-pointer"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          <span>Sync Logs</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleClearAuthLogs}
+                          className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-bold text-xs uppercase tracking-tight flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>Purge Trails</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50 text-slate-400 uppercase text-[9px] font-extrabold tracking-wider border-b border-slate-200">
+                            <th className="py-3 px-4">Index Timestamp</th>
+                            <th className="py-3 px-4">Provided Identifier</th>
+                            <th className="py-3 px-4">Result Status</th>
+                            <th className="py-3 px-4">Reason / Verification Action</th>
+                            <th className="py-3 px-4 font-mono text-right">Target virtual node</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 text-xs text-left text-slate-700">
+                          {authLogs.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="py-12 text-center text-slate-400 font-semibold bg-slate-50/50">
+                                No security logs registered. Attempt authentications to trigger audit indexes.
+                              </td>
+                            </tr>
+                          ) : (
+                            authLogs.map((log) => (
+                              <tr key={log.id} className="hover:bg-slate-50/50 transition-colors font-medium">
+                                <td className="py-3 px-4 text-slate-400 whitespace-nowrap font-mono">{new Date(log.timestamp).toLocaleString()}</td>
+                                <td className="py-3 px-4 font-bold text-slate-800">{log.identifier}</td>
+                                <td className="py-3 px-4 whitespace-nowrap">
+                                  {log.status === "SUCCESS" ? (
+                                    <span className="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-black tracking-wider uppercase border border-emerald-125 border-emerald-100 h-fit">
+                                      SUCCESS MATCH
+                                    </span>
+                                  ) : (
+                                    <span className="bg-red-50 text-red-700 px-2 py-0.5 rounded text-[10px] font-black tracking-wider uppercase border border-red-125 border-red-100 h-fit">
+                                      FAILED ATTEMPT
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-3 px-4 max-w-sm font-semibold text-slate-600 align-middle">
+                                  <span>{log.reason || "Decryption verified. Symmetric Session assigned."}</span>
+                                </td>
+                                <td className="py-3 px-4 text-right font-mono text-slate-400 text-[10px]">
+                                  {log.ip || "127.0.0.1"} (node: sha256_aes)
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+
+                  </div>
+                </div>
+              )}
+
+            </div>
+          )}
+
+          {/* TAB 2: COURSE MATERIALS AREA */}
+          {activeTab === "materials" && (
+            <div className="space-y-6 animate-fade-in">
+              
+              {/* Toolbar */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm">
+                
+                {/* Course Filter Dropdown and description tags */}
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Select Target Course:</span>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setSelectedCourseId("all")}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-colors ${
+                        selectedCourseId === "all"
+                          ? "bg-slate-950 text-white"
+                          : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      }`}
+                    >
+                      All Subjects
+                    </button>
+                    {courses.map(course => (
+                      <button
+                        key={course.id}
+                        onClick={() => setSelectedCourseId(course.id)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-colors whitespace-nowrap ${
+                          selectedCourseId === course.id
+                            ? "bg-slate-950 text-white"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        }`}
+                      >
+                        {course.code}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+                {/* Materials Main Grid Collection Feed */}
+                <div className="lg:col-span-8 space-y-4">
+                  
+                  {filteredMaterials.length === 0 ? (
+                    <div className="bg-white rounded-3xl p-12 text-center border border-slate-200 shadow-sm">
+                      <BookOpen className="w-12 h-12 stroke-1 text-slate-300 mx-auto mb-3" />
+                      <p className="text-sm font-semibold text-slate-500">No course materials matched your selection.</p>
+                      <p className="text-xs text-slate-400 mt-1">Check back later or change Course options.</p>
+                    </div>
+                  ) : (
+                    filteredMaterials.map(mat => {
+                      const associatedCourse = courses.find(c => c.id === mat.courseId);
+                      return (
+                        <div key={mat.id} className="bg-white rounded-3xl p-5 border border-slate-200/85 shadow-sm hover:shadow-md transition-shadow flex items-start justify-between gap-4">
+                          <div className="space-y-2 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="bg-indigo-50 text-indigo-700 font-bold text-[9px] uppercase tracking-wider px-2 py-0.5 rounded">
+                                {associatedCourse?.code || "COURSE"}
+                              </span>
+                              <span className="bg-slate-100 text-slate-600 text-[9px] uppercase tracking-wider px-2 py-0.5 rounded font-bold">
+                                {mat.type.replace("_", " ")}
+                              </span>
+                            </div>
+
+                            <h4 className="text-sm font-bold text-slate-800 leading-tight">{mat.title}</h4>
+                            <p className="text-xs text-slate-500 pr-4 leading-relaxed">{mat.description}</p>
+
+                            <div className="flex items-center gap-4 text-[10px] text-slate-400 capitalize pt-1">
+                              <span>Uploaded: {mat.uploadedBy}</span>
+                              <span>•</span>
+                              <span>Size: {Math.round(mat.fileSize / 1024)} KB</span>
+                              <span>•</span>
+                              <span>{new Date(mat.uploadedAt).toLocaleDateString()}</span>
+                            </div>
+                          </div>
+
+                          <div className="shrink-0 flex flex-col gap-2">
+                            <a
+                              href={`/api/materials/download/${mat.id}`}
+                              download={mat.originalName}
+                              className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold p-2.5 rounded-2xl flex items-center justify-center transition-colors cursor-pointer pointer-events-auto"
+                              title="Secure AES-256 Decrypted Download"
+                            >
+                              <Download className="w-4 h-4" />
+                            </a>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+
+                </div>
+
+                {/* Secure administrative UPLOAD PANEL (Only available for Lecturer or Admins users) */}
+                <div className="lg:col-span-4">
+                  {currentUser?.role === "lecturer" ? (
+                    <div className="bg-white rounded-3xl p-6 border border-slate-200 hover:border-indigo-200 shadow-sm duration-200">
+                      
+                      <div className="flex items-center space-x-2.5 mb-5">
+                        <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                          <UploadCloud className="w-4.5 h-4.5" />
+                        </div>
+                        <div>
+                          <h4 className="font-extrabold text-sm text-slate-800">Secure Uploader</h4>
+                          <span className="text-[10px] text-slate-400 tracking-tight font-bold">Encrypted directly prior to write</span>
+                        </div>
+                      </div>
+
+                      <form onSubmit={handleUploadMaterial} className="space-y-4">
+                        
+                        <div>
+                          <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">
+                            Material Title
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={newMatTitle}
+                            onChange={(e) => setNewMatTitle(e.target.value)}
+                            placeholder="e.g. Slide 3: Network Topology Map"
+                            className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white focus:outline-none rounded-xl py-2 px-3 text-xs text-slate-800 font-medium transition-colors"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">
+                            Academic Course Target
+                          </label>
+                          <select
+                            required
+                            value={newMatCourse}
+                            onChange={(e) => setNewMatCourse(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white focus:outline-none rounded-xl py-2 px-3 text-xs text-slate-800 font-medium transition-colors"
+                          >
+                            <option value="">-- Choose Course --</option>
+                            {courses.map(c => (
+                              <option key={c.id} value={c.id}>{c.code} - {c.name}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">
+                            Document Classification Block
+                          </label>
+                          <select
+                            value={newMatType}
+                            onChange={(e) => setNewMatType(e.target.value as any)}
+                            className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white focus:outline-none rounded-xl py-2 px-3 text-xs text-slate-800 font-medium transition-colors"
+                          >
+                            <option value="lecture_notes">Lecture Notes PDF</option>
+                            <option value="outline">Course Syllabus / Outline</option>
+                            <option value="assignment_prompt">Interactive Assignment Guideline</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">
+                            Qualitative Material Summary
+                          </label>
+                          <textarea
+                            value={newMatDesc}
+                            onChange={(e) => setNewMatDesc(e.target.value)}
+                            placeholder="Briefly state key concepts discussed..."
+                            rows={3}
+                            className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white focus:outline-none rounded-xl py-2 px-3 text-xs text-slate-800 font-medium transition-colors resize-none"
+                          />
+                        </div>
+
+                        {/* File Selector */}
+                        <div>
+                          <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">
+                            Document File (.pdf, .zip, .docx)
+                          </label>
+                          <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center hover:bg-slate-50 transition-colors cursor-pointer relative">
+                            <input
+                              type="file"
+                              required
+                              onChange={(e) => {
+                                if (e.target.files && e.target.files.length > 0) {
+                                  setNewMatFile(e.target.files[0]);
+                                }
+                              }}
+                              className="absolute inset-0 opacity-0 cursor-pointer w-full"
+                            />
+                            <div className="space-y-1">
+                              <Download className="w-5 h-5 mx-auto text-slate-400 animate-bounce" />
+                              <p className="text-xs font-bold text-slate-600">
+                                {newMatFile ? newMatFile.name : "Select or drag files"}
+                              </p>
+                              <span className="text-[10px] text-slate-400 block">Maximum file storage: 32MB</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          type="submit"
+                          disabled={isUploadingMat}
+                          className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs uppercase tracking-widest transition-colors shadow-md shadow-indigo-600/10 cursor-pointer pointer-events-auto flex items-center justify-center gap-1"
+                        >
+                          {isUploadingMat ? (
+                            <>
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                              <span>{uploadProgressMsg || "Encrypting..."}</span>
+                            </>
+                          ) : (
+                            <span>Encrypt Upload File</span>
+                          )}
+                        </button>
+
+                      </form>
+
+                    </div>
+                  ) : (
+                    <div className="bg-indigo-900 text-white p-6 rounded-3xl shadow-lg border border-indigo-950 space-y-4">
+                      <GraduationCap className="w-10 h-10 animate-pulse text-indigo-300" />
+                      <h4 className="font-extrabold text-base">Direct Local Storage Safe</h4>
+                      <p className="text-indigo-100 text-xs leading-relaxed">
+                        To download materials: Select any file and fetch. Direct pipeline automatically decrypts AES-256 blocks block-by-block on physical flight download.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+              </div>
+
+            </div>
+          )}
+
+          {/* TAB 3: ASSIGNMENT SUBMISSIONS & MARKING INTERFACE */}
+          {activeTab === "assignments" && (
+            <div className="space-y-6 animate-fade-in">
+              
+              {/* Top description banner */}
+              <div className="bg-white p-6 border border-slate-200 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
+                <div>
+                  <h3 className="font-black text-slate-900 text-lg">Interactive Handin & Mark Centre</h3>
+                  <p className="text-slate-500 text-xs text-left">
+                    {currentUser?.role === "admin"
+                      ? `Administrative System Monitor - Live tracking academic upgrade lines. Assignments term customized to: "${appConfig.assignmentsTerm}".`
+                      : currentUser?.role === "lecturer"
+                        ? "Review compiled student assignment papers and apply grades in-real-time."
+                        : "Submit secure homework files encryptively and monitor score reports."}
+                  </p>
+                </div>
+              </div>
+
+              {/* Administrative Sub-Tab Tracker Selectors */}
+              {currentUser?.role === "admin" && (
+                <div className="bg-slate-100 p-2 rounded-2xl inline-flex gap-2">
+                  <button 
+                    onClick={() => setAdminSubTab("lecturer")}
+                    className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-tight transition-all cursor-pointer ${adminSubTab === "lecturer" ? `${themeTheme.primary} shadow-md` : "text-slate-600 hover:text-slate-800"}`}
+                  >
+                    Lecturer Grading Queue
+                  </button>
+                  <button 
+                    onClick={() => setAdminSubTab("student")}
+                    className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-tight transition-all cursor-pointer ${adminSubTab === "student" ? `${themeTheme.primary} shadow-md` : "text-slate-600 hover:text-slate-800"}`}
+                  >
+                    Student Handin Hub
+                  </button>
+                </div>
+              )}
+
+              {/* Deadline Calendar View - Highlights upcoming cohort submission dates */}
+              <div className="pointer-events-auto">
+                <DeadlineCalendar 
+                  materials={materials} 
+                  onSelectAssignment={(asgId) => {
+                    const el = document.getElementById(`assignment-${asgId}`);
+                    if (el) {
+                      el.scrollIntoView({ behavior: "smooth", block: "center" });
+                    }
+                  }}
+                />
+              </div>
+
+              {/* LECTURER VIEW: GRADING PORTAL */}
+              {(currentUser?.role === "lecturer" || (currentUser?.role === "admin" && adminSubTab === "lecturer")) ? (
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                  
+                  {/* Left block list: Unmarked / Graded student documents */}
+                  <div className="lg:col-span-8 space-y-4">
+                    <h4 className="font-extrabold text-sm text-slate-700 tracking-tight">Active student assignment queue</h4>
+
+                    {submissions.length === 0 ? (
+                      <div className="bg-white rounded-3xl p-12 text-center border border-slate-200">
+                        <CheckCircle className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                        <p className="text-slate-500 font-semibold text-xs">No student assignment files submitted yet.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {submissions.map(sub => {
+                          const assignmentPromptObj = materials.find(m => m.id === sub.assignmentId);
+                          return (
+                            <div 
+                              key={sub.id} 
+                              className={`bg-white rounded-3xl p-5 border shadow-sm transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer pointer-events-auto ${
+                                selectedSubmissionId === sub.id 
+                                  ? "border-indigo-600 ring-2 ring-indigo-500/10" 
+                                  : "border-slate-200/85 hover:border-slate-300"
+                              }`}
+                              onClick={() => {
+                                setSelectedSubmissionId(sub.id);
+                                setGradingScore(sub.grade || "");
+                                setGradingFeedback(sub.feedback || "");
+                              }}
+                            >
+                              <div className="space-y-1.5 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="bg-slate-100 text-slate-600 font-bold text-[9px] uppercase px-2 py-0.5 rounded">
+                                    Index: {sub.studentIndex}
+                                  </span>
+                                  {sub.status === "graded" ? (
+                                    <span className="bg-emerald-50 text-emerald-700 font-extrabold text-[9px] uppercase px-2 py-0.5 rounded border border-emerald-100">
+                                      Graded: {sub.grade}
+                                    </span>
+                                  ) : (
+                                    <span className="bg-amber-50 text-amber-700 font-medium text-[9px] uppercase px-2 py-0.5 rounded border border-amber-100">
+                                      Awaiting Review
+                                    </span>
+                                  )}
+                                </div>
+
+                                <p className="text-xs font-black text-slate-800 truncate">
+                                  {sub.studentName}
+                                </p>
+                                <p className="text-[11px] text-indigo-600 font-semibold underline truncate">
+                                  Topic: {assignmentPromptObj?.title || sub.originalName}
+                                </p>
+                                <span className="text-[10px] text-slate-400 block">
+                                  Completed: {new Date(sub.uploadedAt).toLocaleString()}
+                                </span>
+                              </div>
+
+                              {/* Control buttons/link */}
+                              <div className="shrink-0 flex items-center gap-2">
+                                <a
+                                  href={`/api/materials/download/${sub.id}`}
+                                  onClick={(e) => e.stopPropagation()} // stop parent card click activate
+                                  className="p-2 sm:px-3.5 sm:py-2 ring-1 ring-slate-200 hover:ring-indigo-300 text-indigo-600 hover:text-white hover:bg-indigo-600 text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer pointer-events-auto"
+                                  title="Download Original student decrypted upload file"
+                                >
+                                  <Download className="w-3.5 h-3.5" />
+                                  <span className="text-[10px] hidden sm:inline">Decrypt & View File</span>
+                                </a>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right block: Integrated Marking Sheet Interface form */}
+                  <div className="lg:col-span-4">
+                    {selectedSubmissionId ? (
+                      <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm sticky top-6">
+                        <div className="flex items-center gap-2 mb-4 border-b border-slate-100 pb-3">
+                          <CheckSquare className="w-4.5 h-4.5 text-indigo-600 animate-pulse" />
+                          <h4 className="font-bold text-sm text-slate-800">Assign Grade Report</h4>
+                        </div>
+
+                        {currentUser?.role === "admin" ? (
+                          <div className="space-y-4 pt-2">
+                            <div>
+                              <p className="block text-left text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">
+                                Letter Grade / Numeric Score
+                              </p>
+                              <div className="w-full bg-slate-100 border border-slate-200 rounded-xl py-2.5 px-3 text-xs text-slate-600 font-bold text-left select-all">
+                                {gradingScore || "Under Review / Unmarked"}
+                              </div>
+                            </div>
+
+                            <div>
+                              <p className="block text-left text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">
+                                Qualitative Comment Feed
+                              </p>
+                              <div className="w-full bg-slate-100 border border-slate-200 rounded-xl py-2.5 px-3 text-xs text-slate-500 font-semibold text-left select-all min-h-24">
+                                {gradingFeedback || "No evaluation comments registered yet."}
+                              </div>
+                            </div>
+
+                            <div className="bg-amber-50 border border-amber-200/85 p-3.5 rounded-xl text-[11px] text-amber-900 font-bold text-center flex flex-col gap-1.5 items-center justify-center">
+                              <Lock className="w-4.5 h-4.5 text-amber-600" />
+                              <span>Administrative Lock - Read-Only Profile</span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => setSelectedSubmissionId(null)}
+                              className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black rounded-xl text-xs uppercase tracking-wider cursor-pointer"
+                            >
+                              Close Tracker View
+                            </button>
+                          </div>
+                        ) : (
+                          <form onSubmit={handleGradeSubmission} className="space-y-4">
+                            
+                            <div>
+                              <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">
+                                Letter Grade / Numeric Score
+                              </label>
+                              <input
+                                type="text"
+                                required
+                                value={gradingScore}
+                                onChange={(e) => setGradingScore(e.target.value)}
+                                placeholder="e.g. A+, 95/100, B"
+                                className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white focus:outline-none rounded-xl py-2 px-3 text-xs text-slate-800 font-medium transition-colors"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">
+                                Qualitative Comment Feed
+                              </label>
+                              <textarea
+                                required
+                                value={gradingFeedback}
+                                onChange={(e) => setGradingFeedback(e.target.value)}
+                                placeholder="Add specific comments about code quality, methodology, etc..."
+                                rows={5}
+                                className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white focus:outline-none rounded-xl py-2 px-3 text-xs text-slate-800 font-medium transition-colors resize-none"
+                              />
+                            </div>
+
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedSubmissionId(null)}
+                                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs uppercase tracking-widest transition-colors cursor-pointer"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="submit"
+                                disabled={isSubmittingGrade}
+                                className="flex-2 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs uppercase tracking-widest transition-colors cursor-pointer pointer-events-auto disabled:opacity-50"
+                              >
+                                {isSubmittingGrade ? "Saving Evaluation..." : "Push Mark"}
+                              </button>
+                            </div>
+
+                          </form>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="p-6 text-center border-2 border-dashed border-slate-250 bg-slate-50 rounded-3xl">
+                        <User className="w-8 h-8 text-slate-400 mx-auto mb-2 opacity-50" />
+                        <p className="text-xs text-slate-600 font-semibold leading-relaxed">
+                          Select any student submit record on the left to activate active mark dashboard panel.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                </div>
+              ) : (
+                /* STUDENT VIEW: SUBMISSION LIST & UPLOAD WORKFLOWS */
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-fade-in">
+                  
+                  {/* Left block list: Students view their homework uploads results */}
+                  <div className="lg:col-span-7 space-y-4">
+                    <h4 className="font-extrabold text-sm text-slate-700 tracking-tight">Active Submission History</h4>
+
+                    <div className="space-y-4">
+                      {materials.filter(m => m.type === "assignment_prompt").length === 0 ? (
+                        <div className="text-center bg-white border border-slate-200/80 rounded-3xl p-10 font-medium text-slate-400 text-xs">
+                          No assignment prompts published.
+                        </div>
+                      ) : (
+                        materials.filter(m => m.type === "assignment_prompt").map(asg => {
+                          const userSub = studentSubmissionsMap[asg.id];
+                          return (
+                            <div key={asg.id} id={`assignment-${asg.id}`} className="bg-white rounded-3xl p-5 border border-slate-200/85 hover:border-slate-300 transition-colors shadow-sm space-y-3">
+                              <div className="flex items-start justify-between">
+                                <div>
+                                  <h5 className="text-xs font-black text-slate-800 select-all">{asg.title}</h5>
+                                  <span className="text-[10px] text-slate-400 uppercase font-bold tracking-tight block">
+                                    Promoted: {new Date(asg.uploadedAt).toLocaleDateString()}
+                                  </span>
+                                </div>
+
+                                <div className="text-right">
+                                  {userSub ? (
+                                    userSub.status === "graded" ? (
+                                      <span className="bg-emerald-50 text-emerald-800 font-bold text-[10px] rounded px-2 py-0.5 border border-emerald-100">
+                                        Score: {userSub.grade}
+                                      </span>
+                                    ) : (
+                                      <span className="bg-amber-50 text-amber-800 font-medium text-[10px] rounded px-2 py-0.5 border border-amber-100">
+                                        Under evaluation
+                                      </span>
+                                    )
+                                  ) : (
+                                    <span className="bg-rose-50 text-rose-800 font-semibold text-[10px] rounded px-2 py-0.5 border border-rose-100">
+                                      Unsubmitted
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {userSub && userSub.feedback && (
+                                <div className="bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100 text-xs text-indigo-950 space-y-1">
+                                  <p className="font-extrabold text-[10px] text-indigo-700 uppercase tracking-wider">Lecturer Feedback Comment:</p>
+                                  <p className="leading-relaxed font-medium">"{userSub.feedback}"</p>
+                                </div>
+                              )}
+
+                              {userSub && (
+                                <div className="flex items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-slate-50">
+                                  <span>Draft Code: {userSub.originalName}</span>
+                                  <span>Uploaded Code: {new Date(userSub.uploadedAt).toLocaleDateString()}</span>
+                                </div>
+                              )}
+
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right block: Student File Handin Form */}
+                  <div className="lg:col-span-5">
+                    <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-md flex flex-col gap-4">
+                      
+                      <div className="flex items-center space-x-2.5">
+                        <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                          <UploadCloud className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h4 className="font-black text-sm text-slate-800">Secure Submission Link</h4>
+                          <span className="text-[10px] text-slate-400 block font-semibold">Decoders run directly via live credentials</span>
+                        </div>
+                      </div>
+
+                      {currentUser?.role === "admin" ? (
+                        <div className="space-y-4 pt-2">
+                          <p className="text-xs font-semibold text-slate-500 leading-relaxed text-left">
+                            You are looking at the student upload workspace interface under Administrative supervision. Writing assignments or forwarding document binaries is strictly confined to active student credentials.
+                          </p>
+                          <div className="bg-amber-50 border border-amber-200/85 p-3.5 rounded-xl text-[11px] text-amber-900 font-bold text-center flex flex-col gap-1.5 items-center justify-center">
+                            <Lock className="w-5 h-5 text-amber-600" />
+                            <span>Administrative Access - Submissions Locked</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <form onSubmit={handleStudentSubmission} className="space-y-4">
+                          
+                          <div>
+                            <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">
+                              Target Assignment Topic
+                            </label>
+                            <select
+                              required
+                              value={subAssignmentId}
+                              onChange={(e) => setSubAssignmentId(e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white focus:outline-none rounded-xl py-3 px-3 text-xs text-slate-800 font-semibold transition-colors"
+                            >
+                              <option value="">-- Choose Prompt --</option>
+                              {materials.filter(m => m.type === "assignment_prompt").map(as => (
+                                <option key={as.id} value={as.id}>{as.title}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Drag and Drop File selector */}
+                          <div>
+                            <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">
+                              Submission Artifact (PDF, DOCX, ZIP files)
+                            </label>
+                            <div className="border-2 border-dashed border-slate-200 hover:border-indigo-400 rounded-xl p-8 text-center transition-colors relative cursor-pointer">
+                              <input
+                                type="file"
+                                required
+                                onChange={(e) => {
+                                  if (e.target.files && e.target.files.length > 0) {
+                                    setSubFile(e.target.files[0]);
+                                  }
+                                }}
+                                className="absolute inset-0 opacity-0 cursor-pointer w-full"
+                              />
+                              <div className="space-y-2">
+                                <Download className="w-6 h-6 mx-auto text-indigo-500 animate-bounce" />
+                                <p className="text-xs font-semibold text-slate-700">
+                                  {subFile ? subFile.name : "Select raw file to post"}
+                                </p>
+                                <span className="text-[10px] text-slate-400 block font-medium">Auto-encrypt block instantly via AES-256</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <button
+                            type="submit"
+                            disabled={isUploadingSub}
+                            className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-extrabold rounded-xl text-xs uppercase tracking-widest transition-colors cursor-pointer pointer-events-auto shadow-md flex items-center justify-center gap-1.5"
+                          >
+                            {isUploadingSub ? (
+                              <>
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                <span>Symmetric cipher lock serialization...</span>
+                              </>
+                            ) : (
+                              <span>Post Sealed Submission</span>
+                            )}
+                          </button>
+
+                        </form>
+                      )}
+
+                    </div>
+                  </div>
+
+                </div>
+              )}
+
+            </div>
+          )}
+
+          {/* TAB 4: ENCRYPTED PERSONAL NOTEBOOK */}
+          {activeTab === "notes" && (
+            <div className="space-y-6 animate-fade-in">
+              
+              <div className="bg-white p-5 border border-slate-200 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
+                <div>
+                  <h3 className="font-black text-slate-900 text-lg">AES-256 Encrypted Private Notes</h3>
+                  <p className="text-slate-500 text-xs">
+                     Offline support: Any private note added while offline sits secure in local browser cache, and syncs immediately once connection recovers. All text blocks are fully ciphertext secured on the persistent database server.
+                  </p>
+                </div>
+              </div>
+
+              {/* Notes Readability & Customization Setting Hub */}
+              <div className="bg-white rounded-3xl p-5 border border-slate-200 flex flex-wrap items-center justify-between gap-4 shadow-sm">
+                <div className="flex flex-wrap items-center gap-6">
+                  {/* Background Theme Selector */}
+                  <div className="flex items-center space-x-2">
+                    <span className="text-[10px] uppercase font-black text-slate-400 tracking-wider">Aesthetic Theme:</span>
+                    <div className="flex bg-slate-100 rounded-xl p-0.5 border border-slate-200">
+                      {(["light", "sepia", "dark"] as const).map(t => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setNotesColorTheme(t)}
+                          className={`px-3 py-1 text-xs font-bold rounded-lg capitalize cursor-pointer transition-all ${
+                            notesColorTheme === t 
+                              ? "bg-white text-slate-800 shadow-sm font-extrabold" 
+                              : "text-slate-500 hover:text-slate-850"
+                          }`}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Font Selector */}
+                  <div className="flex items-center space-x-2">
+                    <span className="text-[10px] uppercase font-black text-slate-400 tracking-wider font-bold">Typeface:</span>
+                    <div className="flex bg-slate-100 rounded-xl p-0.5 border border-slate-200">
+                      {(["sans", "serif", "mono"] as const).map(f => (
+                        <button
+                          key={f}
+                          type="button"
+                          onClick={() => setNotesFontFamily(f)}
+                          className={`px-3 py-1 text-xs font-bold rounded-lg capitalize cursor-pointer transition-all ${
+                            notesFontFamily === f 
+                              ? "bg-white text-slate-800 shadow-sm font-extrabold" 
+                              : "text-slate-500 hover:text-slate-850"
+                          }`}
+                        >
+                          {f === "sans" ? "Sans" : f === "serif" ? "Serif" : "Mono"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Font Size Selector */}
+                  <div className="flex items-center space-x-2">
+                    <span className="text-[10px] uppercase font-black text-slate-400 tracking-wider">Scale:</span>
+                    <div className="flex bg-slate-100 rounded-xl p-0.5 border border-slate-200">
+                      {(["sm", "base", "lg"] as const).map(s => (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => setNotesFontSize(s)}
+                          className={`px-3 py-1 text-xs font-bold rounded-lg uppercase cursor-pointer transition-all ${
+                            notesFontSize === s 
+                              ? "bg-white text-slate-800 shadow-sm font-extrabold" 
+                              : "text-slate-500 hover:text-slate-855"
+                          }`}
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* PDF Backup actions indicator when notes are selected */}
+                {notes.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (selectedNoteIds.length === notes.length) {
+                          setSelectedNoteIds([]);
+                        } else {
+                          setSelectedNoteIds(notes.map(n => n.id));
+                        }
+                      }}
+                      className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer"
+                    >
+                      {selectedNoteIds.length === notes.length ? "Deselect All" : "Select All"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleExportSelectedNotesToPDF}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs uppercase tracking-wider px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 transition-all shadow-md shadow-indigo-600/10 cursor-pointer pointer-events-auto"
+                    >
+                      <Download className="w-4 h-4 text-white" />
+                      <span>Export Selected ({selectedNoteIds.length}) to PDF</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                
+                {/* Note Editing Panel Input block form */}
+                <div className="lg:col-span-4 bg-white rounded-3xl p-6 border border-slate-200 shadow-sm flex flex-col justify-start">
+                  <h4 className="font-extrabold text-sm text-slate-800 flex items-center gap-2 mb-4 border-b border-slate-100 pb-3">
+                    <Plus className="w-4.5 h-4.5 text-indigo-600" />
+                    <span>{editingNoteId ? "Update Crypt Note" : "Log New Crypt Note"}</span>
+                  </h4>
+
+                  {currentUser?.role === "admin" ? (
+                    <div className="space-y-4 pt-2">
+                      <p className="text-xs font-semibold text-slate-500 leading-relaxed text-left">
+                        Personal Study Notes are private cryptographic files mapped exclusively to student users. Admins can view note schemas and existing metadata indexes, but creating or updating notes is restricted.
+                      </p>
+                      <div className="bg-amber-50 border border-amber-200/85 p-3.5 rounded-xl text-[11px] text-amber-900 font-bold text-center flex flex-col gap-1.5 items-center justify-center">
+                        <Lock className="w-5 h-5 text-amber-600" />
+                        <span>Administrative Profile - Studies Note Lock</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <form onSubmit={handleSaveNote} className="space-y-4">
+                      
+                      <div>
+                        <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">
+                          Note Title
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={noteTitle}
+                          onChange={(e) => setNoteTitle(e.target.value)}
+                          placeholder="e.g. Encryption keys slide feedback"
+                          className={`w-full focus:outline-none rounded-xl py-2.5 px-3 border transition-colors font-semibold ${
+                            notesColorTheme === "light"
+                              ? "bg-slate-50 border-slate-200 text-slate-800 focus:bg-white focus:border-indigo-500"
+                              : notesColorTheme === "sepia"
+                              ? "bg-[#FAF2DF] border-[#EADCAE] text-[#4A321A] focus:bg-[#FFFDF6] focus:border-amber-600"
+                              : "bg-slate-950 border-slate-800 text-slate-100 focus:bg-slate-900 focus:border-indigo-600"
+                          } ${
+                            notesFontFamily === "sans" ? "font-sans" : notesFontFamily === "serif" ? "font-serif" : "font-mono"
+                          } ${
+                            notesFontSize === "sm" ? "text-xs" : notesFontSize === "base" ? "text-xs sm:text-sm" : "text-sm sm:text-base"
+                          }`}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">
+                          Notebook Content Block
+                        </label>
+                        <textarea
+                          required
+                          value={noteContent}
+                          onChange={(e) => setNoteContent(e.target.value)}
+                          placeholder="Note bodies are encrypted dynamically on live nodes prior to hard storage saves..."
+                          rows={8}
+                          className={`w-full focus:outline-none rounded-xl py-2.5 px-3 border transition-colors resize-none leading-relaxed ${
+                            notesColorTheme === "light"
+                              ? "bg-slate-50 border-slate-200 text-slate-800 focus:bg-white focus:border-indigo-500"
+                              : notesColorTheme === "sepia"
+                              ? "bg-[#FAF2DF] border-[#EADCAE] text-[#4A321A] focus:bg-[#FFFDF6] focus:border-amber-600"
+                              : "bg-slate-950 border-slate-800 text-slate-100 focus:bg-slate-900 focus:border-indigo-600"
+                          } ${
+                            notesFontFamily === "sans" ? "font-sans" : notesFontFamily === "serif" ? "font-serif" : "font-mono"
+                          } ${
+                            notesFontSize === "sm" ? "text-xs" : notesFontSize === "base" ? "text-xs sm:text-sm" : "text-sm sm:text-base"
+                          }`}
+                        />
+                      </div>
+
+                      <div className="flex gap-2.5">
+                        {editingNoteId && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingNoteId(null);
+                              setNoteTitle("");
+                              setNoteContent("");
+                            }}
+                            className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs uppercase tracking-widest cursor-pointer"
+                          >
+                            Clear
+                          </button>
+                        )}
+                        <button
+                          type="submit"
+                          className="flex-2 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs uppercase tracking-widest cursor-pointer pointer-events-auto shadow-md shadow-indigo-600/10"
+                        >
+                          {editingNoteId ? "Update Cipher" : "Lock In Storage"}
+                        </button>
+                      </div>
+
+                    </form>
+                  )}
+                </div>
+
+                {/* Encrypted notebooks list feed */}
+                <div className="lg:col-span-8 space-y-4">
+                  <h4 className="font-extrabold text-sm text-slate-700 tracking-tight">Active Private Notebook collection</h4>
+
+                  {notes.length === 0 ? (
+                    <div className="bg-white rounded-3xl p-12 text-center border border-slate-250">
+                      <BookOpen className="w-10 h-10 text-slate-300 mx-auto mb-2 opacity-50" />
+                      <p className="text-xs text-slate-500 font-semibold">Your crypto-secured student notes notebook starts empty.</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {notes.map(note => {
+                        const isSelected = selectedNoteIds.includes(note.id);
+                        return (
+                          <div 
+                            key={note.id} 
+                            onClick={() => {
+                              setEditingNoteId(note.id);
+                              setNoteTitle(note.title);
+                              setNoteContent(note.content);
+                            }}
+                            className={`rounded-3xl p-5 border shadow-sm flex flex-col justify-between gap-4 cursor-pointer hover:shadow-md transition-all ${
+                              notesColorTheme === "light"
+                                ? (!note.isSynced ? "bg-amber-50/25 border-amber-300 ring-4 ring-amber-500/5 text-slate-800" : "bg-white border-slate-200 text-slate-800 hover:border-slate-350")
+                                : notesColorTheme === "sepia"
+                                ? (!note.isSynced ? "bg-[#FAF2DF] border-[#EADCAE] ring-4 ring-amber-500/5 text-[#5C401F]" : "bg-[#FCF6E8] border-[#E8DEC0]/80 text-[#5C401F] hover:border-[#D8CEB0]")
+                                : (!note.isSynced ? "bg-slate-950 border-amber-400 ring-4 ring-amber-500/5 text-slate-300" : "bg-slate-900 border-slate-800 text-slate-200 hover:border-slate-705")
+                            } ${
+                              isSelected ? "ring-2 ring-indigo-500 ring-offset-2" : ""
+                            } ${
+                              notesFontFamily === "sans" ? "font-sans" : notesFontFamily === "serif" ? "font-serif" : "font-mono"
+                            }`}
+                          >
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 truncate">
+                                  <input 
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={(e) => {
+                                      e.stopPropagation();
+                                      if (isSelected) {
+                                        setSelectedNoteIds(selectedNoteIds.filter(id => id !== note.id));
+                                      } else {
+                                        setSelectedNoteIds([...selectedNoteIds, note.id]);
+                                      }
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="w-3.5 h-3.5 rounded border-slate-305 text-indigo-600 focus:ring-indigo-550 cursor-pointer"
+                                  />
+                                  <p className={`text-xs font-black truncate ${
+                                    notesColorTheme === "light" ? "text-slate-800" : notesColorTheme === "sepia" ? "text-[#4A321B]" : "text-white"
+                                  }`} title={note.title}>
+                                    {note.title}
+                                  </p>
+                                </div>
+                                {!note.isSynced ? (
+                                  <span className="text-[9px] bg-amber-600 text-white px-2 py-0.5 rounded-full font-bold uppercase whitespace-nowrap">
+                                    Offline
+                                  </span>
+                                ) : (
+                                  <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase whitespace-nowrap ${
+                                    notesColorTheme === "dark" ? "bg-slate-850 text-indigo-300" : "bg-indigo-50 text-indigo-700"
+                                  }`}>
+                                    AES-256
+                                  </span>
+                                )}
+                              </div>
+                              <p className={`line-clamp-3 leading-relaxed ${
+                                notesFontSize === "sm" ? "text-[11px]" : notesFontSize === "base" ? "text-xs" : "text-sm"
+                              } ${
+                                notesColorTheme === "light" ? "text-slate-500" : notesColorTheme === "sepia" ? "text-[#6A5237]" : "text-slate-400"
+                              }`}>
+                                {note.content}
+                              </p>
+                            </div>
+
+                            <div className={`flex items-center justify-between text-[10px] border-t pt-2.5 ${
+                              notesColorTheme === "light" ? "border-slate-100 text-slate-404 text-slate-400" : notesColorTheme === "sepia" ? "border-[#E8DEC0]/40 text-[#8C765C]" : "border-slate-800 text-slate-500"
+                            }`}>
+                              <span>{new Date(note.updatedAt).toLocaleDateString()}</span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteNoteLocal(note.id);
+                                }}
+                                className="text-[10px] font-bold text-rose-500 hover:text-rose-700 hover:underline cursor-pointer"
+                              >
+                                Discard
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+              </div>
+
+            </div>
+          )}
+
+          {/* TAB 5: SYSTEM GUIDELINES & PURPOSE OVERVIEW */}
+          {activeTab === "security" && (
+            <div className="max-w-4xl mx-auto bg-white rounded-3xl p-8 border border-slate-200 shadow-xl space-y-8 animate-fade-in">
+              
+              <div className="flex items-center space-x-3.5 border-b border-slate-100 pb-5">
+                <div className="w-10 h-10 bg-indigo-50 text-indigo-750 text-indigo-600 rounded-xl flex items-center justify-center font-black">
+                  <ShieldCheck className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-lg">
+                    {currentUser?.role === "student" && "GDCMS Student Outline & Operating Guidelines"}
+                    {currentUser?.role === "lecturer" && "GDCMS Lecturer Outline & Operating Guidelines"}
+                    {currentUser?.role === "admin" && "GDCMS Portal Administrative Guidelines"}
+                    {!currentUser?.role && "GDCMS Student Outline & Operating Guidelines"}
+                  </h3>
+                  <span className="text-xs text-slate-400 block font-semibold">
+                    User Role verified for study: {currentUser?.role === "admin" ? "System Administrator Access" : currentUser?.role === "lecturer" ? "Academic Faculty Console" : "Active Student Workspace Access"}
+                  </span>
+                </div>
+              </div>
+
+              <div className={`grid ${currentUser?.role === "admin" ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1"} gap-6 leading-relaxed`}>
+                
+                {(currentUser?.role === "student" || currentUser?.role === "admin" || !currentUser?.role) && (
+                  <div className="bg-slate-50 border border-slate-150 rounded-2xl p-5 space-y-3">
+                    <h4 className="font-extrabold text-sm text-indigo-950 flex items-center gap-2">
+                      <span className="w-2 h-2 bg-indigo-600 rounded-full"></span>
+                      <span>For Students</span>
+                    </h4>
+                    <ul className="text-xs text-slate-600 space-y-2 list-disc list-inside font-semibold">
+                      <li>Download dynamic course materials, slides, outline sheets and assignment descriptions directly.</li>
+                      <li>Submit your academic hand-in solutions via the assignments portal for graded reviews.</li>
+                      <li>Stay alert with real-time browser indicators for published results.</li>
+                      <li>Compose private studies review notes inside your offline-cached personal scratchpad.</li>
+                    </ul>
+                  </div>
+                )}
+
+                {(currentUser?.role === "lecturer" || currentUser?.role === "admin") && (
+                  <div className="bg-slate-50 border border-slate-150 rounded-2xl p-5 space-y-3">
+                    <h4 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
+                      <span className="w-2 h-2 bg-indigo-600 rounded-full"></span>
+                      <span>For Lecturers & Coordinators</span>
+                    </h4>
+                    <ul className="text-xs text-slate-600 space-y-2 list-disc list-inside font-semibold">
+                      <li>Upload the latest syllabus files and lecture outlines so students have instant access.</li>
+                      <li>Post formatted assignment prompts specifying submission milestones.</li>
+                      <li>Audit incoming student coursework submissions directly through the evaluation desk.</li>
+                      <li>Provide scores and written qualitative feedback logs to auto-alert individual students.</li>
+                    </ul>
+                  </div>
+                )}
+
+              </div>
+
+              <div className="space-y-4">
+                <h4 className="font-black text-xs uppercase tracking-wider text-slate-400">Classroom Values & Code of Honor</h4>
+                <div className="p-5 bg-indigo-50/50 border border-indigo-100 rounded-2xl text-slate-700 text-xs leading-relaxed space-y-3.5 font-semibold">
+                  <p>
+                    GDCMS is designed to support academic honesty, qualitative evaluation cycles, and peer collaboration. Students are encouraged to use their study binders responsibly and double-check prompt deadlines on their dashboards.
+                  </p>
+                  <p>
+                    Your user credentials specify your dynamic interface role (Student vs. Lecturer Console). If you require role elevation to coordinate syllabi or class outlines, contact the GDCMS Administration support channel.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-4 bg-slate-50/50 border border-slate-150 rounded-xl text-center text-slate-500 font-semibold text-[11px]">
+                To view security configurations, active session status or offline synchronization parameters, inspect the documentation.
+              </div>
+
+            </div>
+          )}
+
+        </main>
+
+        {/* Global sticky layout footer status indicators */}
+        <footer className="bg-white border-t border-slate-200 px-6 py-3.5 flex items-center justify-between text-[11px] text-slate-400 shrink-0">
+          <div>
+            <span>GDCMS Class Management Portal • Version 3.5.2 (Secure Build)</span>
+          </div>
+          <div>
+            <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded font-bold">● System Encrypted</span>
+          </div>
+        </footer>
+
+      </div>
+
+    </div>
+  );
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Group D Class Management System",
+  "description": "A comprehensive school class portal allowing lecturers / students to share materials, manage assignments, log personal notes, and view performance with robust device sync, offline support, push notifications, and cryptographic AES-256 data security.",
+  "requestFramePermissions": ["notifications"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
