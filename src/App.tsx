@@ -30,8 +30,15 @@ import {
   Wrench,
   Sparkles,
   Users,
-  Palette
+  Palette,
+  Cloud,
+  MoreVertical,
+  Share2,
+  Bell,
+  Sun,
+  Moon
 } from "lucide-react";
+import { useGlobalTheme } from "./ThemeContext";
 import OfflineIndicator from "./components/OfflineIndicator";
 import NotificationBell from "./components/NotificationBell";
 import DeadlineCalendar from "./components/DeadlineCalendar";
@@ -39,6 +46,8 @@ import { User as UserType, Course, Material, Submission, PersonalNote, Notificat
 import { jsPDF } from "jspdf";
 
 export default function App() {
+  const { theme, toggleTheme } = useGlobalTheme();
+
   // Authentication & Session State
   const [token, setToken] = useState<string | null>(() => localStorage.getItem("gdcms_token"));
   const [currentUser, setCurrentUser] = useState<UserType | null>(null);
@@ -46,6 +55,22 @@ export default function App() {
   const [authView, setAuthView] = useState<"welcome" | "login" | "register">("welcome");
   const [authError, setAuthError] = useState<string | null>(null);
   const [isLoadingUser, setIsLoadingUser] = useState(false);
+
+  // Google Integration & Admin Navigation States
+  const [googleToken, setGoogleToken] = useState<string | null>(null);
+  const [adminPanelTab, setAdminPanelTab] = useState<"config" | "sandbox" | "addUser" | "usersList">("config");
+  const [openMaterialMenuId, setOpenMaterialMenuId] = useState<string | null>(null);
+  const [showGoogleConnectModal, setShowGoogleConnectModal] = useState(false);
+
+  // Admin Registration Sub-Form States
+  const [adminRegisterIndexNumber, setAdminRegisterIndexNumber] = useState("");
+  const [adminRegisterFullName, setAdminRegisterFullName] = useState("");
+  const [adminRegisterEmail, setAdminRegisterEmail] = useState("");
+  const [adminRegisterPassword, setAdminRegisterPassword] = useState("");
+  const [adminRegisterRole, setAdminRegisterRole] = useState<"student" | "lecturer" | "admin">("student");
+  const [adminRegisterError, setAdminRegisterError] = useState<string | null>(null);
+  const [adminRegisterSuccess, setAdminRegisterSuccess] = useState<string | null>(null);
+  const [isAdminRegisteringUser, setIsAdminRegisteringUser] = useState(false);
 
   // Scroll references for welcome landing page smooth-scroll behaviour
   const purposeRef = useRef<HTMLDivElement>(null);
@@ -62,7 +87,7 @@ export default function App() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<"student" | "lecturer">("student");
+  const [role, setRole] = useState<"student" | "lecturer" | "admin">("student");
 
   // Core App Data Collections
   const [courses, setCourses] = useState<Course[]>([]);
@@ -70,6 +95,10 @@ export default function App() {
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [notes, setNotes] = useState<PersonalNote[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [allStudents, setAllStudents] = useState<any[]>([]);
+  const [isLoadingAllUsers, setIsLoadingAllUsers] = useState(false);
+  const [isLoadingAllStudents, setIsLoadingAllStudents] = useState(false);
 
   // Active UI Navigation / Selections
   const [activeTab, setActiveTab] = useState<"dashboard" | "materials" | "assignments" | "notes" | "security">("dashboard");
@@ -403,39 +432,242 @@ export default function App() {
     localStorage.setItem("gdcms_notes_theme", notesColorTheme);
   }, [notesFontFamily, notesFontSize, notesColorTheme]);
 
-  // Format student index numbers as BC/ITN/XX/XXX
-  const formatIndexNumberInput = (value: string, prevValue: string = "") => {
-    if (prevValue && value.length < prevValue.length) {
-      if (value.toLowerCase() === "bc/itn/") {
-        return "";
+  // Google OAuth Listener & Account Synchronization
+  useEffect(() => {
+    const handleGoogleAuthMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'GOOGLE_AUTH_SUCCESS') {
+        setGoogleToken(event.data.token);
+        alert("Google account synchronized successfully! Google Drive & Google Calendar are now active in your session.");
       }
-      if (value.toLowerCase().startsWith("bc/itn/") && value.endsWith("/")) {
-        const currentClean = value.replace(/BC/gi, "").replace(/ITN/gi, "").replace(/[^a-zA-Z0-9]/g, "");
-        if (currentClean.length > 0) {
-          const cut = currentClean.slice(0, -1);
-          if (cut.length === 0) return "";
-          if (cut.length <= 2) return `BC/ITN/${cut}`;
-          return `BC/ITN/${cut.slice(0, 2)}/${cut.slice(2, 5)}`;
+    };
+    window.addEventListener("message", handleGoogleAuthMessage);
+    return () => window.removeEventListener("message", handleGoogleAuthMessage);
+  }, []);
+
+  // Reset forms automatically on new view transition so previous credentials are not preserved in inputs
+  useEffect(() => {
+    setIndexNumber("");
+    setFullName("");
+    setEmail("");
+    setPassword("");
+    setAuthError(null);
+  }, [authView]);
+
+  const handleConnectGoogle = async () => {
+    setShowGoogleConnectModal(true);
+  };
+
+  const handleLaunchGoogleOAuthPopup = async () => {
+    setShowGoogleConnectModal(false);
+    try {
+      const res = await fetch("/api/auth/google-url");
+      const data = await res.json();
+      if (res.ok && data.url) {
+        window.open(data.url, "google_oauth_popup", "width=555,height=655");
+      } else {
+        alert(data.error || "Could not retrieve Google sign-in configuration.");
+      }
+    } catch (err) {
+      console.error("Popup launch failure:", err);
+      alert("Error occurred connecting to the identity server.");
+    }
+  };
+
+  const triggerNotificationPermissionRequest = async () => {
+    if (!("Notification" in window)) {
+      alert("This browser does not support physical desktop push notifications.");
+      return;
+    }
+    try {
+      const result = await Notification.requestPermission();
+      if (result === "granted") {
+        new Notification("GDCMS Push Activated ✔️", {
+          body: "You will receive instant push notifications for course releases and grade publishes."
+        });
+      } else {
+        alert("Push notifications were declined or blocked. Enable them in site info.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Push notification subscription failed.");
+    }
+  };
+
+  const handleAdminRegisterUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminRegisterError(null);
+    setAdminRegisterSuccess(null);
+    setIsAdminRegisteringUser(true);
+
+    if (!adminRegisterFullName || !adminRegisterEmail || !adminRegisterPassword || !adminRegisterRole) {
+      setAdminRegisterError("Please fill out all mandatory registration fields.");
+      setIsAdminRegisteringUser(false);
+      return;
+    }
+
+    if (adminRegisterRole === "student" && !adminRegisterIndexNumber) {
+      setAdminRegisterError("Students require a valid index number ID.");
+      setIsAdminRegisteringUser(false);
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          fullName: adminRegisterFullName,
+          email: adminRegisterEmail,
+          password: adminRegisterPassword,
+          role: adminRegisterRole,
+          indexNumber: adminRegisterRole === "student" ? adminRegisterIndexNumber : undefined
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setAdminRegisterSuccess(`Successfully registered ${adminRegisterFullName} (${adminRegisterRole}) in system database.`);
+        // Reset sub-form inputs
+        setAdminRegisterFullName("");
+        setAdminRegisterEmail("");
+        setAdminRegisterPassword("");
+        setAdminRegisterIndexNumber("");
+      } else {
+        setAdminRegisterError(data.error || "Registration request rejected by system.");
+      }
+    } catch (err: any) {
+      console.error("Admin user creation failed:", err);
+      setAdminRegisterError("Internal server response failure. Check connection.");
+    } finally {
+      setIsAdminRegisteringUser(false);
+    }
+  };
+
+  const [isExportingNotesToDrive, setIsExportingNotesToDrive] = useState(false);
+
+  const handleExportSelectedNotesToGoogleDrive = async () => {
+    const notesToBackup = notes.filter(n => selectedNoteIds.includes(n.id));
+    if (notesToBackup.length === 0) {
+      alert("Please select at least one study note to back up to Google Drive first!");
+      return;
+    }
+
+    if (!googleToken) {
+      alert("Please connect your Google Drive account first using the Sync button!");
+      return;
+    }
+
+    setIsExportingNotesToDrive(true);
+    try {
+      const metadata = {
+        name: `GDCMS_Private_Study_Notes_${new Date().toISOString().slice(0, 10)}.txt`,
+        mimeType: "text/plain"
+      };
+      
+      const fileContent = notesToBackup
+        .map(n => `=== ${n.title} ===\n${n.content}\nUpdated At: ${new Date(n.updatedAt).toLocaleString()}\n`)
+        .join("\n\n");
+
+      const boundary = "-------314159265358979323846";
+      const delimiter = `\r\n--${boundary}\r\n`;
+      const close_delim = `\r\n--${boundary}--`;
+
+      const multipartBody = 
+        delimiter +
+        'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+        JSON.stringify(metadata) +
+        delimiter +
+        'Content-Type: text/plain; charset=UTF-8\r\n\r\n' +
+        fileContent +
+        close_delim;
+
+      const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${googleToken}`,
+          "Content-Type": `multipart/related; boundary=${boundary}`
+        },
+        body: multipartBody
+      });
+
+      if (res.ok) {
+        alert("Success: Selected study notebook backed up successfully as a document in your Google Drive!");
+        setSelectedNoteIds([]);
+      } else {
+        const txt = await res.text();
+        console.error("Drive upload response error:", txt);
+        alert("Failed to back up to Google Drive. Check write permission scopes.");
+      }
+    } catch (err) {
+      console.error("Backup exception:", err);
+      alert("Error occurred uploading file to Google Drive.");
+    } finally {
+      setIsExportingNotesToDrive(false);
+    }
+  };
+
+  // Format student index numbers as XX/YYY/ZZ/AAA dynamically
+  const formatIndexNumberInput = (value: string, prevValue: string = "") => {
+    const isBackspace = prevValue && value.length < prevValue.length;
+    
+    // Strip all non-alphanumeric characters
+    let clean = value.replace(/[^a-zA-Z0-9]/g, "");
+    
+    // Max length is 10 alphanumeric characters (2 + 3 + 2 + 3)
+    if (clean.length > 10) {
+      clean = clean.slice(0, 10);
+    }
+    
+    // Handle backspace when deleting a character right after a slash
+    if (isBackspace && prevValue.endsWith("/") && value === prevValue.slice(0, -1)) {
+      const prevClean = prevValue.replace(/[^a-zA-Z0-9]/g, "");
+      if (prevClean.length > 0) {
+        const cutClean = prevClean.slice(0, -1);
+        let temp = "";
+        if (cutClean.length > 0) {
+          temp += cutClean.slice(0, 2);
+          if (cutClean.length > 2) {
+            temp += "/";
+            temp += cutClean.slice(2, 5);
+            if (cutClean.length > 5) {
+              temp += "/";
+              temp += cutClean.slice(5, 7);
+              if (cutClean.length > 7) {
+                temp += "/";
+                temp += cutClean.slice(7, 10);
+              }
+            }
+          }
         }
+        return temp;
       }
     }
 
-    const trimmed = value.trim();
-    if (trimmed.includes("@") || trimmed.toUpperCase().startsWith("L-") || trimmed.toUpperCase().startsWith("A-")) {
-      return value;
+    // Build the formatted string dynamically
+    let formatted = "";
+    if (clean.length > 0) {
+      // First 2 characters
+      formatted += clean.slice(0, 2);
+      if (clean.length > 2) {
+        formatted += "/";
+        // Next 3 characters
+        formatted += clean.slice(2, 5);
+        if (clean.length > 5) {
+          formatted += "/";
+          // Next 2 characters
+          formatted += clean.slice(5, 7);
+          if (clean.length > 7) {
+            formatted += "/";
+            // Last 3 characters
+            formatted += clean.slice(7, 10);
+          }
+        }
+      }
     }
     
-    let clean = trimmed.replace(/BC/gi, "").replace(/ITN/gi, "").replace(/[^a-zA-Z0-9]/g, "");
-    
-    if (clean.length === 0) {
-      return value ? "BC/ITN/" : "";
-    }
-    
-    if (clean.length <= 2) {
-      return `BC/ITN/${clean}`;
-    } else {
-      return `BC/ITN/${clean.slice(0, 2)}/${clean.slice(2, 5)}`;
-    }
+    return formatted;
   };
 
   // Automatically clear inputs when switching between welcome, login, or register
@@ -612,7 +844,7 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setCurrentUser(data);
-        fetchAppData(token!);
+        fetchAppData(token!, data);
       } else {
         // Clear expired tokens
         setToken(null);
@@ -624,7 +856,7 @@ export default function App() {
     }
   };
 
-  const fetchAppData = async (activeToken: string) => {
+  const fetchAppData = async (activeToken: string, userObj?: any) => {
     try {
       const headers = { Authorization: `Bearer ${activeToken}` };
       
@@ -641,6 +873,37 @@ export default function App() {
       if (resSubmissions.ok) setSubmissions(await resSubmissions.json());
       if (resNotes.ok) setNotes(await resNotes.json());
       if (resNotifs.ok) setNotifications(await resNotifs.json());
+
+      const activeUser = userObj || currentUser;
+      if (activeUser) {
+        if (activeUser.role === "admin") {
+          setIsLoadingAllUsers(true);
+          try {
+            const resU = await fetch("/api/admin/users", { headers });
+            if (resU.ok) {
+              const uData = await resU.json();
+              setAllUsers(uData);
+            }
+          } catch (e) {
+            console.error("All users load error:", e);
+          } finally {
+            setIsLoadingAllUsers(false);
+          }
+        } else if (activeUser.role === "lecturer") {
+          setIsLoadingAllStudents(true);
+          try {
+            const resS = await fetch("/api/lecturer/students", { headers });
+            if (resS.ok) {
+              const sData = await resS.json();
+              setAllStudents(sData);
+            }
+          } catch (e) {
+            console.error("All students load error:", e);
+          } finally {
+            setIsLoadingAllStudents(false);
+          }
+        }
+      }
     } catch (error) {
       console.error("Critical dashboard batch fetch halted:", error);
     }
@@ -752,6 +1015,7 @@ export default function App() {
       } catch (e) {}
     }
     setToken(null);
+    setGoogleToken(null);
     setCurrentUser(null);
     setCourses([]);
     setMaterials([]);
@@ -1136,10 +1400,10 @@ export default function App() {
     // RENDER SYSTEM WELCOME LANDING & INTUITIVE GATEWAY INTERFACE
     // ---------------------------------------------------------
     return (
-      <div className="min-h-screen bg-slate-50 text-slate-950 flex flex-col selection:bg-indigo-600 selection:text-white" style={{ fontFamily: "Inter, system-ui, sans-serif" }}>
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-950 dark:text-slate-100 flex flex-col selection:bg-indigo-600 selection:text-white" style={{ fontFamily: "Inter, system-ui, sans-serif" }}>
         
         {/* FIXED SUBTLE NAVIGATION NAVBAR HEADER */}
-        <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-200 px-6 py-4 flex items-center justify-between shadow-sm">
+        <header className="sticky top-0 z-50 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-6 py-4 flex items-center justify-between shadow-sm">
           <div className="flex items-center space-x-3 cursor-pointer" onClick={() => setAuthView("welcome")}>
             <div className="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center font-black text-white shadow-md shadow-indigo-600/25">
               G
@@ -1168,6 +1432,15 @@ export default function App() {
           )}
 
           <div className="flex items-center space-x-2">
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:text-amber-400 dark:hover:bg-slate-700/80 text-slate-500 hover:text-slate-900 rounded-xl transition-all cursor-pointer mr-1"
+              title="Toggle system theme"
+            >
+              {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+
             {authView !== "welcome" ? (
               <button
                 onClick={() => { setAuthView("welcome"); setAuthError(null); }}
@@ -1216,10 +1489,10 @@ export default function App() {
                     Login to Account
                   </button>
                   <button
-                    onClick={() => { setAuthView("register"); setAuthMode("register"); setRole("student"); setAuthError(null); }}
-                    className="w-full sm:w-auto px-8 py-4 bg-white hover:bg-slate-100 text-slate-900 border border-slate-300 font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all hover:scale-102 cursor-pointer"
+                    onClick={() => handleSmoothScroll(purposeRef)}
+                    className="w-full sm:w-auto px-8 py-4 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all hover:scale-102 cursor-pointer"
                   >
-                    Sign Up If New Student
+                    Explore System Features
                   </button>
                 </div>
               </div>
@@ -1294,204 +1567,140 @@ export default function App() {
               </div>
             </section>
 
-            {/* SECTION 3: TRIAL CREDENTIALS & ONE-CLICK TRIAL ACCESS */}
-            {showPublicSandbox && (
-              <section ref={trialRef} id="trials" className="py-16 px-6 bg-slate-100 animate-in fade-in slide-in-from-bottom-4 duration-300">
-              <div className="max-w-4xl mx-auto space-y-8">
-                <div className="text-center space-y-1">
-                  <h2 className="text-xs uppercase font-extrabold tracking-widest text-indigo-600">Workspace Sandbox</h2>
-                  <p className="text-2xl font-black text-slate-900 tracking-tight">Access Trials & Guest Credentials</p>
-                  <p className="text-xs text-slate-500 font-semibold max-w-sm mx-auto">
-                    Evaluate GDCMS immediately. Choose a pre-seeded account below to trigger instant one-click login trials.
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-
-                  {/* Student Card */}
-                  <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col justify-between shadow-sm hover:shadow-md transition-all">
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
-                        <span className="text-[10px] uppercase font-black text-emerald-700 tracking-wider">Student Role</span>
-                      </div>
-                      <div className="space-y-1">
-                        <h4 className="font-black text-slate-900 text-base">Clement Koffie</h4>
-                        <p className="text-xs text-slate-500 font-semibold">Verify files library, submit coursework, and audit marked grade reviews.</p>
-                      </div>
-                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-150 space-y-1.5 text-xs text-slate-600 font-semibold">
-                        <p className="flex justify-between">
-                          <span className="text-slate-400 font-medium">Index Key:</span>
-                          <span className="text-slate-800 select-all">10928374</span>
-                        </p>
-                        <p className="flex justify-between text-[11px]">
-                          <span className="text-slate-400 font-medium font-bold">Email:</span>
-                          <span className="text-slate-850 select-all font-bold">koffieclement12@...</span>
-                        </p>
-                        <p className="flex justify-between text-[11px]">
-                          <span className="text-slate-400 font-medium">Password:</span>
-                          <span className="text-slate-500 font-bold">123456</span>
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleQuickLogin("10928374")}
-                      className="mt-6 w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black uppercase tracking-wider rounded-lg transition-colors cursor-pointer"
-                    >
-                      Instant Trial Student
-                    </button>
-                  </div>
-
-                  {/* Lecturer Card */}
-                  <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col justify-between shadow-sm hover:shadow-md transition-all">
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 bg-indigo-500 rounded-full"></span>
-                        <span className="text-[10px] uppercase font-black text-indigo-700 tracking-wider">Faculty Role</span>
-                      </div>
-                      <div className="space-y-1">
-                        <h4 className="font-black text-slate-900 text-base">Dr. Emmanuel Vance</h4>
-                        <p className="text-xs text-slate-500 font-semibold">Publish lecture outlines, structure coursework, and evaluate student hand-ins.</p>
-                      </div>
-                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-150 space-y-1.5 text-xs text-slate-600 font-semibold">
-                        <p className="flex justify-between">
-                          <span className="text-slate-400 font-medium">Faculty ID:</span>
-                          <span className="text-slate-800 select-all">L-9001</span>
-                        </p>
-                        <p className="flex justify-between">
-                          <span className="text-slate-400 font-medium font-bold">Email:</span>
-                          <span className="text-slate-850 select-all font-bold">emmanuel.vance@...</span>
-                        </p>
-                        <p className="flex justify-between text-[11px]">
-                          <span className="text-slate-400 font-medium">Password:</span>
-                          <span className="text-slate-500 font-bold">123456</span>
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleQuickLogin("L-9001")}
-                      className="mt-6 w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black uppercase tracking-wider rounded-lg transition-colors cursor-pointer"
-                    >
-                      Instant Trial Lecturer
-                    </button>
-                  </div>
-
-                  {/* Admin Card */}
-                  <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col justify-between shadow-sm hover:shadow-md transition-all">
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 bg-purple-500 rounded-full"></span>
-                        <span className="text-[10px] uppercase font-black text-purple-700 tracking-wider">Coordinator Role</span>
-                      </div>
-                      <div className="space-y-1">
-                        <h4 className="font-black text-slate-900 text-base">Admin Coordinator</h4>
-                        <p className="text-xs text-slate-500 font-semibold">Monitor classroom activity ledger reports, audit outlines, and review general grades.</p>
-                      </div>
-                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-150 space-y-1.5 text-xs text-slate-600 font-semibold">
-                        <p className="flex justify-between">
-                          <span className="text-slate-400 font-medium">Admin ID:</span>
-                          <span className="text-slate-800 select-all">A-0001</span>
-                        </p>
-                        <p className="flex justify-between">
-                          <span className="text-slate-400 font-medium font-bold">Email:</span>
-                          <span className="text-slate-850 select-all font-bold">admin@gdcms.edu</span>
-                        </p>
-                        <p className="flex justify-between text-[11px]">
-                          <span className="text-slate-400 font-medium">Password:</span>
-                          <span className="text-slate-500 font-bold">123456</span>
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleQuickLogin("A-0001")}
-                      className="mt-6 w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-black uppercase tracking-wider rounded-lg transition-colors cursor-pointer"
-                    >
-                      Instant Trial Coordinator
-                    </button>
-                  </div>
-
-                </div>
-              </div>
-            </section>
-            )}
+            {/* SECTION 3 REMOVED - RELOCATED TO ADMIN CONSOLE */}
 
           </main>
         )}
 
         {/* SECURE DEDICATED AUTH VIEWS SECTION (LOGIN & SIGNUP OVERLAYS) */}
         {authView !== "welcome" && (
-          <main className="flex-1 flex flex-col items-center justify-center p-6 bg-slate-100">
-            <div className="w-full max-w-md bg-white border border-slate-200 rounded-3xl p-8 shadow-xl space-y-6">
+          <main className="flex-1 flex flex-col items-center justify-center p-6 bg-[#f0f4f9]">
+            <div className="w-full max-w-[450px] bg-white border border-slate-200/80 rounded-3xl p-8 sm:p-10 shadow-sm space-y-6">
               
-              {/* Branding and welcome title */}
+              {/* Google-like logo emblem and clean title */}
               <div className="text-center">
-                <div className="inline-flex items-center justify-center w-12 h-12 bg-indigo-600 text-white rounded-2xl mb-3 shadow-md shadow-indigo-600/10">
+                <div className="inline-flex items-center justify-center w-12 h-12 bg-indigo-600 text-white rounded-2xl mb-4 shadow-sm shadow-indigo-600/10">
                   <Layers className="w-6 h-6" />
                 </div>
-                <h2 className="text-2xl font-black text-slate-900 tracking-tight">
-                  {authView === "login" ? "Log In to GDCMS" : "Student Registration"}
+                <h2 className="text-2xl font-normal text-[#1e1e1e] tracking-tight">
+                  {authView === "login" ? "Sign in" : "Create account"}
                 </h2>
-                <p className="text-xs text-slate-500 font-medium mt-1">
-                  {authView === "login" 
-                    ? "Verify your credentials to enter the study portal." 
-                    : "Initialize your student profile coordinates below."}
+                <p className="text-sm text-[#444746] mt-2">
+                  to continue to the GDCMS Portal
                 </p>
               </div>
 
               {/* Error block */}
               {authError && (
-                <div className="p-3 bg-rose-50 border border-rose-250 text-rose-700 text-xs rounded-xl font-bold flex items-start gap-2 animate-bounce">
+                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-bold flex items-start gap-2 animate-pulse">
                   <span className="font-bold flex-shrink-0">✖</span>
                   <span>{authError}</span>
                 </div>
               )}
 
-              {/* Login / Signup Selector in Modal Header */}
-              <div className="flex bg-slate-100 p-1.5 rounded-xl border border-slate-205">
-                <button
-                  type="button"
-                  onClick={() => { setAuthView("login"); setAuthMode("login"); setAuthError(null); }}
-                  className={`flex-1 text-center py-2 rounded-lg text-xs font-bold cursor-pointer transition-all ${
-                    authView === "login" 
-                      ? "bg-white text-slate-900 shadow-sm" 
-                      : "text-slate-400 hover:text-slate-700"
-                  }`}
-                >
-                  Verify Index Login
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setAuthView("register"); setAuthMode("register"); setRole("student"); setAuthError(null); }}
-                  className={`flex-1 text-center py-2 rounded-lg text-xs font-bold cursor-pointer transition-all ${
-                    authView === "register" 
-                      ? "bg-white text-slate-900 shadow-sm" 
-                      : "text-slate-400 hover:text-slate-700"
-                  }`}
-                >
-                  Register Student Account
-                </button>
+              {/* Identity Server Sign In Header */}
+              <div className="text-center py-2 border-b border-slate-100">
+                <span className="text-sm font-black text-slate-800 uppercase tracking-widest bg-slate-50 border border-slate-150 px-3 py-1 rounded-xl">
+                  GDCMS Identity Hub
+                </span>
               </div>
 
-              {/* Standard Credentials Input forms (scrubbed of security metrics) */}
+              {/* Three role-selector buttons (Student, Lecturer, Admin) with paragraphs of instructions */}
+              <div className="space-y-4">
+                <div className="text-[11px] font-black uppercase text-slate-400 tracking-wider text-center">
+                  Select your role
+                </div>
+                <div className="grid grid-cols-3 gap-2 p-1 bg-slate-100 rounded-2xl border border-slate-205">
+                  <button
+                    type="button"
+                    onClick={() => { setRole("student"); setAuthError(null); }}
+                    className={`py-2 px-1 text-center rounded-xl text-xs font-bold leading-tight cursor-pointer transition-all ${
+                      role === "student" 
+                        ? "bg-white text-indigo-600 shadow-sm border border-slate-200/50" 
+                        : "text-slate-500 hover:text-slate-800"
+                    }`}
+                  >
+                    Student
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setRole("lecturer"); setAuthError(null); }}
+                    className={`py-2 px-1 text-center rounded-xl text-xs font-bold leading-tight cursor-pointer transition-all ${
+                      role === "lecturer" 
+                        ? "bg-white text-indigo-600 shadow-sm border border-slate-200/50" 
+                        : "text-slate-500 hover:text-slate-800"
+                    }`}
+                  >
+                    Lecturer
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setRole("admin"); setAuthError(null); }}
+                    className={`py-2 px-1 text-center rounded-xl text-xs font-bold leading-tight cursor-pointer transition-all ${
+                      role === "admin" 
+                        ? "bg-white text-indigo-600 shadow-sm border border-slate-200/50" 
+                        : "text-slate-500 hover:text-slate-800"
+                    }`}
+                  >
+                    Admin
+                  </button>
+                </div>
+
+                {/* Sub-tab instruction paragraph container as requested */}
+                <div className="p-4 bg-slate-50 border border-slate-200/60 rounded-2xl text-xs text-slate-500 font-medium leading-relaxed">
+                  {role === "student" && (
+                    <p>
+                      <strong>Student Workspace Access instructions:</strong> Submit papers, write learning notes, review grades, and check syllabi guidelines. Students enter their index; the first 2 characters will trigger an automatic forward slash insertion, next 3, then 2, then 3 characters (e.g. BC/ITN/25/147 - no prefix is locked, any index works!).
+                    </p>
+                  )}
+                  {role === "lecturer" && (
+                    <p>
+                      <strong>Lecturer Console Guidelines:</strong> Coordinate lectures, build study outlines, organize calendars, evaluate assignments, and assign marks under the Study Guild scope. No input structure constraint is enforced; use your registered keys or institutional mail accounts.
+                    </p>
+                  )}
+                  {role === "admin" && (
+                    <p>
+                      <strong>Administrator Panel Guidelines:</strong> Manage systems database nodes, observe audit feeds logs, tweak nomenclatures, and deploy updates. No structured input format is enforced; authorize using your secure coordinator credentials.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Standard Credentials Input form with optimized fields */}
               <form onSubmit={authView === "login" ? handleLogin : handleRegister} className="space-y-4">
                 
-                {/* Identifier box */}
+                {/* ID input block */}
                 <div>
-                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1 tooltip" title="Students must supply their unique numeric Index number.">
-                    {authView === "login" ? "Faculty Email or Academic Index ID" : "Student Index ID Number"}
+                  <label className="block text-[11px] font-bold text-slate-500 mb-1.5">
+                    {role === "student" 
+                      ? "Student Index ID" 
+                      : role === "lecturer" 
+                        ? "Lecturer Institutional Email or ID" 
+                        : "Coordinator Email or ID"}
                   </label>
                   <div className="relative">
                     <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
                       <User className="w-4 h-4" />
                     </span>
-                    <input
-                      type="text"
-                      required
-                      value={indexNumber}
-                      onChange={(e) => setIndexNumber(e.target.value)}
-                      placeholder={authView === "login" ? "e.g. 10928374 or doctor@gdcms.edu" : "e.g. 10928374"}
-                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white focus:outline-none rounded-xl py-3 pl-10 pr-4 text-xs font-semibold text-slate-800 placeholder:text-slate-400 transition-all"
-                    />
+                    {role === "student" ? (
+                      <input
+                        type="text"
+                        required
+                        value={indexNumber}
+                        onChange={(e) => setIndexNumber(formatIndexNumberInput(e.target.value, indexNumber))}
+                        placeholder="XX/YYY/ZZ/AAA (e.g. BC/ITN/25/147)"
+                        className="w-full bg-[#fcfdfe] border border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none rounded-xl py-3 pl-10 pr-4 text-xs font-semibold text-slate-800 placeholder:text-slate-400 transition-all shadow-sm"
+                      />
+                    ) : (
+                      <input
+                        type="text"
+                        required
+                        value={indexNumber}
+                        onChange={(e) => setIndexNumber(e.target.value)}
+                        placeholder={role === "lecturer" ? "e.g. L-9001 or emmanuel.vance@gdcms.edu" : "e.g. A-0001 or admin@gdcms.edu"}
+                        className="w-full bg-[#fcfdfe] border border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none rounded-xl py-3 pl-10 pr-4 text-xs font-semibold text-slate-800 placeholder:text-slate-400 transition-all shadow-sm"
+                      />
+                    )}
                   </div>
                 </div>
 
@@ -1499,27 +1708,27 @@ export default function App() {
                   <>
                     {/* Full Name */}
                     <div>
-                      <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1">Full Name</label>
+                      <label className="block text-[11px] font-bold text-slate-500 mb-1.5">Full Name</label>
                       <input
                         type="text"
                         required
                         value={fullName}
                         onChange={(e) => setFullName(e.target.value)}
                         placeholder="e.g. Clement Koffie"
-                        className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white focus:outline-none rounded-xl py-3 px-4 text-xs font-semibold text-slate-800 placeholder:text-slate-400 transition-all"
+                        className="w-full bg-[#fcfdfe] border border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none rounded-xl py-3 px-4 text-xs font-semibold text-slate-800 placeholder:text-slate-400 transition-all shadow-sm"
                       />
                     </div>
 
                     {/* Email */}
                     <div>
-                      <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1">Institutional Email</label>
+                      <label className="block text-[11px] font-bold text-slate-500 mb-1.5">Institutional Email</label>
                       <input
                         type="email"
                         required
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         placeholder="e.g. student@school.edu"
-                        className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white focus:outline-none rounded-xl py-3 px-4 text-xs font-semibold text-slate-800 placeholder:text-slate-400 transition-all"
+                        className="w-full bg-[#fcfdfe] border border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none rounded-xl py-3 px-4 text-xs font-semibold text-slate-800 placeholder:text-slate-400 transition-all shadow-sm"
                       />
                     </div>
                   </>
@@ -1527,7 +1736,7 @@ export default function App() {
 
                 {/* Password input */}
                 <div>
-                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1 font-bold">Account Access Password</label>
+                  <label className="block text-[11px] font-bold text-slate-500 mb-1.5">Account Access Password</label>
                   <div className="relative">
                     <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
                       <Lock className="w-4 h-4" />
@@ -1538,16 +1747,16 @@ export default function App() {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="••••••••"
-                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white focus:outline-none rounded-xl py-3 pl-10 pr-4 text-xs font-semibold text-slate-800 placeholder:text-slate-400 transition-all"
+                      className="w-full bg-[#fcfdfe] border border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none rounded-xl py-3 pl-10 pr-4 text-xs font-semibold text-slate-800 placeholder:text-slate-400 transition-all shadow-sm"
                     />
                   </div>
                 </div>
 
-                {/* Submit Trigger */}
+                {/* Submit Trigger - Google Button Accent */}
                 <button
                   type="submit"
                   disabled={isLoadingUser}
-                  className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-805 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-indigo-600/10 cursor-pointer pointer-events-auto"
+                  className="w-full py-3 bg-indigo-605 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-sm hover:shadow cursor-pointer"
                 >
                   {isLoadingUser ? "Authorizing Access..." : authView === "login" ? "Log In to Dashboard" : "Create Account"}
                 </button>
@@ -1556,6 +1765,7 @@ export default function App() {
               {/* Switch directions */}
               <div className="text-center pt-2">
                 <button
+                  type="button"
                   onClick={() => { setAuthView("welcome"); setAuthError(null); }}
                   className="text-xs font-bold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
                 >
@@ -1587,7 +1797,7 @@ export default function App() {
   // RENDER DYNAMIC SCHOOL CLASS WEBAPP (Dashboard Interface)
   // ---------------------------------------------------------
   return (
-    <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-800 flex flex-col lg:flex-row shadow-2xl overflow-x-hidden selection:bg-indigo-600 selection:text-white">
+    <div className={`min-h-screen bg-[#F8FAFC] dark:bg-slate-950 font-sans text-slate-800 dark:text-slate-100 flex flex-col lg:flex-row shadow-2xl overflow-x-hidden selection:bg-indigo-600 selection:text-white`}>
       
       {/* Mobile & Tablet Top Navbar Header Bar */}
       <div className="lg:hidden flex items-center justify-between bg-slate-900 border-b border-slate-800 text-white px-5 h-16 shrink-0 z-40 sticky top-0">
@@ -1626,6 +1836,102 @@ export default function App() {
           onClick={() => setIsMobileMenuOpen(false)}
           className="fixed inset-0 bg-black/60 z-40 lg:hidden animate-fade-in pointer-events-auto"
         />
+      )}
+
+      {/* GOOGLE WORKSPACE INTEGRATION PERMISSIONS EXPLANATION MODAL */}
+      {showGoogleConnectModal && (
+        <div className="fixed inset-0 bg-slate-905/70 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl w-full max-w-lg border border-slate-200/60 shadow-2xl overflow-hidden animate-scale-up text-left">
+            
+            {/* Header banner */}
+            <div className="bg-[#4f46e5] text-white p-6 relative">
+              <button 
+                onClick={() => setShowGoogleConnectModal(false)}
+                className="absolute top-4 right-4 p-1 hover:bg-white/10 rounded-lg text-white/80 hover:text-white transition-colors cursor-pointer text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-white/10 rounded-xl">
+                  <Cloud className="w-6 h-6 text-indigo-100" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base tracking-tight uppercase">Google Academic Hub</h3>
+                  <p className="text-[10px] text-white/70 tracking-widest font-black uppercase">Secure OAuth 2.0 Auth Bridge</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Explanation & Benefits content */}
+            <div className="p-6 space-y-5">
+              <div className="text-xs text-slate-500 leading-relaxed font-semibold">
+                By connecting GDCMS securely to your preferred Google Account, the system synchronizes academic schedules, cohorts outlines, assessment deadlines, and provides persistent cloud notebook backup capabilities. Learn about some of the secure benefits:
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex items-start gap-3">
+                  <div className="p-1.5 bg-indigo-50 text-indigo-650 rounded-xl shrink-0">
+                    <Calendar className="w-4 h-4 text-indigo-600" />
+                  </div>
+                  <div className="space-y-0.5 text-xs text-left">
+                    <h4 className="font-extrabold text-slate-805 text-slate-800">Automated Calendar Deadlines Syncing</h4>
+                    <p className="text-slate-500 leading-relaxed font-semibold">Any lecturer assignment sheets release, examination, quiz deadlines, or study calendars are immediately exported to your Google Calendar app.</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <div className="p-1.5 bg-amber-50 text-amber-600 rounded-xl shrink-0">
+                    <Download className="w-4 h-4 text-amber-550 text-amber-500" />
+                  </div>
+                  <div className="space-y-0.5 text-xs text-left">
+                    <h4 className="font-extrabold text-slate-800">Secure AES-256 Google Drive Notebook Backups</h4>
+                    <p className="text-slate-500 leading-relaxed font-semibold">Encrypt and export your sandboxed private study review notes onto a secure repository inside Google Drive with 1-click execution.</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-xl shrink-0">
+                    <Activity className="w-4 h-4 text-emerald-500" />
+                  </div>
+                  <div className="space-y-0.5 text-xs text-left">
+                    <h4 className="font-extrabold text-slate-808 text-slate-800">24/7 Cross-Device Offline Alerts Pipeline</h4>
+                    <p className="text-slate-500 leading-relaxed font-semibold">Native calendar notifications on Android, iOS, or macOS coordinate with you offline to maintain high academic performance rates.</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <div className="p-1.5 bg-slate-100 text-slate-650 text-slate-600 rounded-xl shrink-0">
+                    <ShieldCheck className="w-4 h-4 text-slate-600" />
+                  </div>
+                  <div className="space-y-0.5 text-xs text-left">
+                    <h4 className="font-extrabold text-slate-800">Symmetrical Sandboxed Authorization</h4>
+                    <p className="text-slate-500 leading-relaxed font-semibold">Your institutional authentication keys or credentials are never shared. Rest assured that the GDCMS Auth Hub only requests explicit read/write calendar permissions.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Actions buttons footer */}
+            <div className="bg-slate-50 border-t border-slate-150 p-4 shrink-0 flex items-center justify-end gap-3.5">
+              <button
+                type="button"
+                onClick={() => setShowGoogleConnectModal(false)}
+                className="px-4 py-2 border rounded-xl hover:bg-slate-100 text-slate-500 hover:text-slate-880 hover:text-slate-800 font-bold text-xs uppercase tracking-tight cursor-pointer"
+              >
+                Disconnect & Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleLaunchGoogleOAuthPopup}
+                className="px-5 py-2.5 bg-indigo-650 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <Sparkles className="w-4 h-4 text-white hover:scale-105" />
+                <span>Begin Secure Integration</span>
+              </button>
+            </div>
+
+          </div>
+        </div>
       )}
 
       {/* Sidebar navigation panel */}
@@ -1735,9 +2041,26 @@ export default function App() {
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
             <span className="truncate">{appConfig.systemShort} Active Live</span>
           </div>
+
+          {/* Theme switching button */}
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="mt-3 w-full py-2 px-3 bg-black/10 hover:bg-black/25 rounded-xl text-xs font-bold transition-all flex items-center justify-between cursor-pointer text-slate-300 hover:text-white"
+            title="Toggle system-wide light/dark theme"
+          >
+            <span className="flex items-center gap-1.5">
+              {theme === "dark" ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-slate-400" />}
+              <span>{theme === "dark" ? "Light Mode" : "Dark Mode"}</span>
+            </span>
+            <span className="text-[9px] uppercase tracking-wider opacity-60 px-1.5 py-0.5 bg-black/30 rounded font-black">
+              {theme}
+            </span>
+          </button>
+
           <button
             onClick={() => { handleSignOut(); setIsMobileMenuOpen(false); }}
-            className="mt-4 w-full py-2.5 bg-black/20 hover:bg-rose-600 text-slate-300 hover:text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+            className="mt-3.5 w-full py-2.5 bg-black/20 hover:bg-rose-600 text-slate-300 hover:text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer"
           >
             <LogOut className="w-3.5 h-3.5" />
             <span>Sign Out</span>
@@ -2013,7 +2336,7 @@ export default function App() {
                     <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm flex items-center justify-between">
                       <div>
                         <p className="text-[10px] text-slate-400 uppercase font-black tracking-wider">Cohort Size</p>
-                        <p className="text-2xl font-black text-slate-800 mt-1">2 Registered</p>
+                        <p className="text-2xl font-black text-slate-800 mt-1">{allStudents.length || 2} Enrolled</p>
                       </div>
                       <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl">
                         <Users className="w-5 h-5" />
@@ -2230,6 +2553,84 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* REGISTERED STUDENT ACCOUNTS DIRECTORY FOR LECTURERS */}
+                  <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm mt-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
+                      <div>
+                        <h3 className="font-extrabold text-sm text-slate-800 flex items-center gap-2">
+                          <Users className="w-4 h-4 text-indigo-650 text-indigo-600 animate-pulse" />
+                          <span>Student Accounts Directory ({allStudents.length} Students Enrolled)</span>
+                        </h3>
+                        <p className="text-[11px] text-slate-400 font-medium">
+                          Overview of all enrolled students synced in the class management system.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => fetchAppData(token!)}
+                        disabled={isLoadingAllStudents}
+                        className="shrink-0 px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-705 text-slate-705 text-slate-700 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer border border-slate-200"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${isLoadingAllStudents ? "animate-spin" : ""}`} />
+                        <span>Sync Students</span>
+                      </button>
+                    </div>
+
+                    {isLoadingAllStudents && allStudents.length === 0 ? (
+                      <div className="text-center py-8 animate-pulse">
+                        <RefreshCw className="w-6 h-6 text-indigo-600 animate-spin mx-auto mb-2" />
+                        <p className="text-xs font-semibold text-slate-500">Retrieving student records securely...</p>
+                      </div>
+                    ) : allStudents.length === 0 ? (
+                      <div className="text-center py-8 bg-slate-50 border border-dashed border-slate-200 rounded-2xl">
+                        <p className="text-xs font-bold text-slate-700">No student users found in the database.</p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                        <table className="w-full text-left border-collapse text-xs font-semibold">
+                          <thead>
+                            <tr className="bg-slate-50 border-b border-slate-150 border-slate-200 text-[10px] font-black uppercase text-slate-400 tracking-wider">
+                              <th className="py-3 px-4">Student Card</th>
+                              <th className="py-3 px-4">Student Index ID</th>
+                              <th className="py-3 px-4">Email Address</th>
+                              <th className="py-3 px-4">Google Hub Sync</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
+                            {allStudents.map((stud) => (
+                              <tr key={stud.id} className="hover:bg-slate-50/40 transition-colors">
+                                <td className="py-3 px-4">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-600 font-bold flex items-center justify-center uppercase border border-slate-200 shrink-0">
+                                      {stud.fullName.substring(0, 2).toUpperCase()}
+                                    </div>
+                                    <span className="font-bold text-slate-900">{stud.fullName}</span>
+                                  </div>
+                                </td>
+                                <td className="py-3 px-4 font-mono font-bold text-slate-600">
+                                  {stud.indexNumber || "NOT ASSIGNED"}
+                                </td>
+                                <td className="py-3 px-4 text-slate-500 text-xs font-semibold">
+                                  {stud.email}
+                                </td>
+                                <td className="py-3 px-4 font-bold text-xs font-semibold">
+                                  {stud.oauthConnected ? (
+                                    <span className="text-emerald-600 flex items-center gap-1">
+                                      <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping"></span>
+                                      <span>Active Sync</span>
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-400">Not Synced</span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+
                 </div>
               )}
 
@@ -2237,7 +2638,57 @@ export default function App() {
               {currentUser?.role === "admin" && (
                 <div className="space-y-6 animate-fade-in">
                   
-                  {/* Separation of Concerns Protection Warning */}
+                  {/* Administrative sub-tab selectors */}
+                  <div className="p-1 bg-slate-100 border border-slate-200 rounded-2xl flex flex-wrap gap-2 inline-flex">
+                    <button
+                      type="button"
+                      onClick={() => setAdminPanelTab("config")}
+                      className={`px-5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                        adminPanelTab === "config"
+                          ? "bg-white text-slate-800 shadow-sm"
+                          : "text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      System Configurations
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdminPanelTab("addUser")}
+                      className={`px-5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                        adminPanelTab === "addUser"
+                          ? "bg-white text-slate-800 shadow-sm"
+                          : "text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      Add New Users
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdminPanelTab("usersList")}
+                      className={`px-5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                        adminPanelTab === "usersList"
+                          ? "bg-white text-slate-800 shadow-sm"
+                          : "text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      Registered Users ({allUsers.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdminPanelTab("sandbox")}
+                      className={`px-5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                        adminPanelTab === "sandbox"
+                          ? "bg-indigo-605 bg-indigo-600 text-white shadow-md animate-pulse"
+                          : "text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      Trial Sandbox Room
+                    </button>
+                  </div>
+
+                  {adminPanelTab === "config" && (
+                    <div className="space-y-6">
+                      {/* Separation of Concerns Protection Warning */}
                   <div className="bg-amber-50/60 border border-amber-200/80 p-5 rounded-3xl flex items-start gap-4">
                     <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
                     <div className="text-xs">
@@ -2536,14 +2987,14 @@ export default function App() {
                             authLogs.map((log) => (
                               <tr key={log.id} className="hover:bg-slate-50/50 transition-colors font-medium">
                                 <td className="py-3 px-4 text-slate-400 whitespace-nowrap font-mono">{new Date(log.timestamp).toLocaleString()}</td>
-                                <td className="py-3 px-4 font-bold text-slate-800">{log.identifier}</td>
+                                <td className="py-3 px-4 font-bold text-slate-800">{log.identifier || log.emailOrIndex || "System Session"}</td>
                                 <td className="py-3 px-4 whitespace-nowrap">
-                                  {log.status === "SUCCESS" ? (
-                                    <span className="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-black tracking-wider uppercase border border-emerald-125 border-emerald-100 h-fit">
+                                  {log.status?.toUpperCase() === "SUCCESS" ? (
+                                    <span className="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-black tracking-wider uppercase border border-emerald-100 h-fit">
                                       SUCCESS MATCH
                                     </span>
                                   ) : (
-                                    <span className="bg-red-50 text-red-700 px-2 py-0.5 rounded text-[10px] font-black tracking-wider uppercase border border-red-125 border-red-100 h-fit">
+                                    <span className="bg-red-50 text-red-700 px-2 py-0.5 rounded text-[10px] font-black tracking-wider uppercase border border-red-100 h-fit">
                                       FAILED ATTEMPT
                                     </span>
                                   )}
@@ -2552,7 +3003,7 @@ export default function App() {
                                   <span>{log.reason || "Decryption verified. Symmetric Session assigned."}</span>
                                 </td>
                                 <td className="py-3 px-4 text-right font-mono text-slate-400 text-[10px]">
-                                  {log.ip || "127.0.0.1"} (node: sha256_aes)
+                                  {log.ip || log.ipPlaceholder || "127.0.0.1"} (node: sha255_aes)
                                 </td>
                               </tr>
                             ))
@@ -2560,8 +3011,408 @@ export default function App() {
                         </tbody>
                       </table>
                     </div>
-
                   </div>
+                </div>
+            )}
+
+            {adminPanelTab === "addUser" && (
+              <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-sm space-y-6 max-w-2xl mx-auto text-left animate-fade-in">
+                <div>
+                  <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-xl font-black uppercase tracking-wider">
+                    database coordination
+                  </span>
+                  <h3 className="text-lg font-black text-slate-900 mt-1.5 flex items-center gap-2">
+                    <Users className="w-5 h-5 text-indigo-650 text-indigo-600 animate-pulse" />
+                    <span>Register & Add New Portal Users</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                    As System Administrator, you can enroll new students, lecturers, or other administrators directly into the GDCMS database.
+                  </p>
+                </div>
+
+                {adminRegisterError && (
+                  <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-bold flex items-start gap-2 animate-pulse">
+                    <span>✖</span>
+                    <span>{adminRegisterError}</span>
+                  </div>
+                )}
+
+                {adminRegisterSuccess && (
+                  <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs rounded-xl font-bold flex items-start gap-2">
+                    <span>✔</span>
+                    <span>{adminRegisterSuccess}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleAdminRegisterUser} className="space-y-5">
+                  
+                  {/* Selector for user role */}
+                  <div className="space-y-2">
+                    <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider">
+                      Choose Placement Role
+                    </label>
+                    <div className="grid grid-cols-3 gap-3 p-1 bg-slate-100 rounded-2xl border border-slate-200">
+                      {[
+                        { label: "Student", value: "student" },
+                        { label: "Lecturer", value: "lecturer" },
+                        { label: "Administrator", value: "admin" }
+                      ].map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => {
+                            setAdminRegisterRole(opt.value as any);
+                            setAdminRegisterError(null);
+                            setAdminRegisterSuccess(null);
+                          }}
+                          className={`py-2 px-2 text-center rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            adminRegisterRole === opt.value
+                              ? "bg-white text-indigo-600 shadow-sm border border-slate-200/50 font-black"
+                              : "text-slate-500 hover:text-slate-700"
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Instructional placeholder text */}
+                  <div className="p-4 bg-slate-50 border border-slate-200/50 rounded-2xl text-[11px] text-slate-500 leading-relaxed">
+                    {adminRegisterRole === "student" && (
+                      <p><strong>Student Rules:</strong> Must enter fullname, secure email/id, password, and a student index conforming to the custom index formatter (e.g. <code>BC/ITN/25/147</code>).</p>
+                    )}
+                    {adminRegisterRole === "lecturer" && (
+                      <p><strong>Lecturer Rules:</strong> Enrolls an educator account. No structural input format constraints are locked. Enter email address or standard lecturer ID code.</p>
+                    )}
+                    {adminRegisterRole === "admin" && (
+                      <p><strong>Admin Rules:</strong> Creates an administrative user with complete oversight on databases, rebranding matrixes and system control setups.</p>
+                    )}
+                  </div>
+
+                  {/* Full name input */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-slate-500">
+                      Full Legal Name
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={adminRegisterFullName}
+                      onChange={(e) => setAdminRegisterFullName(e.target.value)}
+                      placeholder="e.g. Emmanuel Vance"
+                      className="w-full bg-[#fcfdfe] border border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none rounded-xl py-3 px-4 text-xs font-semibold text-slate-800 placeholder:text-slate-400 transition-all shadow-sm"
+                    />
+                  </div>
+
+                  {/* Institutional Email list */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-slate-500">
+                      {adminRegisterRole === "student" ? "Student Email or ID" : adminRegisterRole === "lecturer" ? "Lecturer Email or ID" : "Coordinators Email or ID"}
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={adminRegisterEmail}
+                      onChange={(e) => setAdminRegisterEmail(e.target.value)}
+                      placeholder={adminRegisterRole === "student" ? "e.g. student@gdcms.edu" : adminRegisterRole === "lecturer" ? "e.g. lecturer@gdcms.edu" : "e.g. admin@gdcms.edu"}
+                      className="w-full bg-[#fcfdfe] border border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none rounded-xl py-3 px-4 text-xs font-semibold text-slate-805 text-slate-850 text-slate-800 placeholder:text-slate-400 transition-all shadow-sm"
+                    />
+                  </div>
+
+                  {/* Student index conditional input */}
+                  {adminRegisterRole === "student" && (
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-500">
+                        Student Index Number ID
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={adminRegisterIndexNumber}
+                        onChange={(e) => setAdminRegisterIndexNumber(formatIndexNumberInput(e.target.value, adminRegisterIndexNumber))}
+                        placeholder="e.g. BC/ITN/25/147"
+                        className="w-full bg-[#fcfdfe] border border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none rounded-xl py-3 px-4 text-xs font-semibold text-slate-800 placeholder:text-slate-400 transition-all shadow-sm"
+                      />
+                    </div>
+                  )}
+
+                  {/* Access Password */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-slate-500">
+                      Default Profile Access Password
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      value={adminRegisterPassword}
+                      onChange={(e) => setAdminRegisterPassword(e.target.value)}
+                      placeholder="default password (client must update on login)"
+                      className="w-full bg-[#fcfdfe] border border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none rounded-xl py-3 px-4 text-xs font-semibold text-slate-800 placeholder:text-slate-400 transition-all shadow-sm"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isAdminRegisteringUser}
+                    className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer shadow-md shadow-indigo-600/15"
+                  >
+                    {isAdminRegisteringUser ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Enrolling User onto DB...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="w-4 h-4" />
+                        <span>Confirm Profile Registry Enrollment</span>
+                      </>
+                    )}
+                  </button>
+                </form>
+              </div>
+            )}
+
+            {adminPanelTab === "usersList" && (
+              <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-sm space-y-6 text-left animate-fade-in">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-xl font-black uppercase tracking-wider">
+                      global database directory
+                    </span>
+                    <h3 className="text-lg font-black text-slate-900 mt-1.5 flex items-center gap-2">
+                      <Users className="w-5 h-5 text-indigo-650 text-indigo-600 animate-pulse" />
+                      <span>Platform Users Repository</span>
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                      Real-time register outlines of enrolled platform accounts. Symmetrical credential security keys remain invisible (passwords cannot be exposed).
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => fetchAppData(token!)}
+                    disabled={isLoadingAllUsers}
+                    className="shrink-0 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-705 text-slate-700 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer border border-slate-200 hover:border-slate-300 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isLoadingAllUsers ? "animate-spin" : ""}`} />
+                    <span>Synchronize DB</span>
+                  </button>
+                </div>
+
+                {/* Micro metrics count layout */}
+                <div className="grid grid-cols-3 gap-4 p-4 bg-slate-50 border border-slate-150 rounded-2xl">
+                  <div className="text-center sm:text-left">
+                    <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Students count</p>
+                    <p className="text-xl font-black text-indigo-600">{allUsers.filter(u => u.role === "student").length}</p>
+                  </div>
+                  <div className="text-center sm:text-left border-l border-slate-200 pl-4">
+                    <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Lecturers count</p>
+                    <p className="text-xl font-black text-emerald-600">{allUsers.filter(u => u.role === "lecturer").length}</p>
+                  </div>
+                  <div className="text-center sm:text-left border-l border-slate-200 pl-4">
+                    <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Admins count</p>
+                    <p className="text-xl font-black text-amber-600">{allUsers.filter(u => u.role === "admin").length}</p>
+                  </div>
+                </div>
+
+                {isLoadingAllUsers && allUsers.length === 0 ? (
+                  <div className="text-center py-12">
+                    <RefreshCw className="w-8 h-8 text-indigo-600 animate-spin mx-auto mb-3" />
+                    <p className="text-xs font-semibold text-slate-500">Querying live indexes matrix from securely encapsulated nodes...</p>
+                  </div>
+                ) : allUsers.length === 0 ? (
+                  <div className="text-center py-12 bg-slate-50 border border-dashed border-slate-200 rounded-2xl">
+                    <Users className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                    <p className="text-xs font-bold text-slate-700">No database directories indexed yet.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto border border-slate-200 rounded-2xl">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50/70 border-b border-slate-200 text-[10px] font-black uppercase text-slate-400 tracking-widest">
+                          <th className="py-3 px-4">Name & Email</th>
+                          <th className="py-3 px-4">Security Role</th>
+                          <th className="py-3 px-4">Identity / Index Code</th>
+                          <th className="py-3 px-4">Google Integration</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-xs font-semibold">
+                        {allUsers.map((userObjItem) => (
+                          <tr key={userObjItem.id} className="hover:bg-slate-50/40 transition-colors">
+                            <td className="py-3.5 px-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-600 font-bold flex items-center justify-center uppercase border border-slate-200 shrink-0">
+                                  {userObjItem.fullName.substring(0, 2).toUpperCase()}
+                                </div>
+                                <div>
+                                  <p className="font-extrabold text-slate-800">{userObjItem.fullName}</p>
+                                  <p className="text-[10px] text-slate-400 font-semibold">{userObjItem.email}</p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-4 font-bold">
+                              {userObjItem.role === "admin" && (
+                                <span className="bg-amber-50 text-amber-700 border border-amber-200/55 px-2.5 py-0.5 rounded-lg text-[9px] uppercase tracking-wider font-extrabold">
+                                  administrator
+                                </span>
+                              )}
+                              {userObjItem.role === "lecturer" && (
+                                <span className="bg-emerald-50 text-emerald-700 border border-emerald-200/55 px-2.5 py-0.5 rounded-lg text-[9px] uppercase tracking-wider font-extrabold">
+                                  lecturer
+                                </span>
+                              )}
+                              {userObjItem.role === "student" && (
+                                <span className="bg-indigo-50 text-indigo-700 border border-indigo-200/55 px-2.5 py-0.5 rounded-lg text-[9px] uppercase tracking-wider font-extrabold">
+                                  student
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3.5 px-4 font-mono font-bold text-slate-600">
+                              {userObjItem.role === "student" ? userObjItem.indexNumber || "NOT ASSIGNED" : "FACULTY PIN"}
+                            </td>
+                            <td className="py-3.5 px-4 font-bold text-xs">
+                              {userObjItem.oauthConnected ? (
+                                <span className="text-emerald-600 flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping"></span>
+                                  <span>Synced ✔</span>
+                                </span>
+                              ) : (
+                                <span className="text-slate-400">Not Synced</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {adminPanelTab === "sandbox" && (
+              <div className="space-y-6 animate-fade-in">
+                       {/* Preseeded Sandbox workspace cards */}
+                       <div className="bg-white p-6 border border-slate-200 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm text-left">
+                         <div>
+                           <h3 className="font-black text-slate-900 text-base flex items-center gap-2">
+                             <Wrench className="w-5 h-5 text-indigo-650 text-indigo-600 animate-pulse" />
+                             <span>Admin Managed Sandbox Room & Trial Sessions</span>
+                           </h3>
+                           <p className="text-slate-500 text-xs mt-1 leading-relaxed">
+                             Evaluate or test alternative student and educator user workspaces instantly without manual register steps. Click an access key card below to authenticate.
+                           </p>
+                         </div>
+                       </div>
+
+                       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+                         {/* Student Card */}
+                         <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col justify-between shadow-sm hover:shadow-md transition-all text-left">
+                           <div className="space-y-4">
+                             <div className="flex items-center gap-2">
+                               <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
+                               <span className="text-[10px] uppercase font-black text-emerald-700 tracking-wider">Student Role access</span>
+                             </div>
+                             <div className="space-y-1">
+                               <h4 className="font-black text-slate-900 text-base">Clement Koffie</h4>
+                               <p className="text-xs text-slate-500 font-semibold leading-relaxed">Submit private papers, write learning notebook blocks, and synchronize with Drive.</p>
+                             </div>
+                             <div className="p-3 bg-slate-50 rounded-xl border border-slate-150 space-y-1.5 text-xs text-slate-600 font-semibold">
+                               <p className="flex justify-between">
+                                 <span className="text-slate-400 font-medium font-bold">Index ID:</span>
+                                 <span className="text-slate-800 font-mono font-bold select-all">BC/ITN/25/147</span>
+                               </p>
+                               <p className="flex justify-between text-[11px]">
+                                 <span className="text-slate-400 font-medium">Email:</span>
+                                 <span className="text-slate-850 font-bold select-all">koffieclement12@gmail.com</span>
+                               </p>
+                               <p className="flex justify-between text-[11px]">
+                                 <span className="text-slate-400 font-medium">Session Key:</span>
+                                 <span className="text-slate-500 font-mono select-all">123456</span>
+                               </p>
+                             </div>
+                           </div>
+                           <button
+                             type="button"
+                             onClick={() => handleQuickLogin("BC/ITN/25/147")}
+                             className="mt-6 w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black uppercase tracking-wider rounded-lg transition-colors cursor-pointer"
+                           >
+                             Log in as Student (Clement)
+                           </button>
+                         </div>
+
+                         {/* Lecturer Card */}
+                         <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col justify-between shadow-sm hover:shadow-md transition-all text-left">
+                           <div className="space-y-4">
+                             <div className="flex items-center gap-2">
+                               <span className="w-2 h-2 bg-indigo-500 rounded-full"></span>
+                               <span className="text-[10px] uppercase font-black text-indigo-700 tracking-wider">Faculty Console access</span>
+                             </div>
+                             <div className="space-y-1">
+                               <h4 className="font-black text-slate-900 text-base">Dr. Emmanuel Vance</h4>
+                               <p className="text-xs text-slate-500 font-semibold leading-relaxed">Structure lectures summaries, organize academic calendars, and assign student marks.</p>
+                             </div>
+                             <div className="p-3 bg-slate-50 rounded-xl border border-slate-150 space-y-1.5 text-xs text-slate-600 font-semibold">
+                               <p className="flex justify-between">
+                                 <span className="text-slate-400 font-medium font-bold">Faculty ID:</span>
+                                 <span className="text-slate-800 font-mono font-bold select-all">L-9001</span>
+                               </p>
+                               <p className="flex justify-between">
+                                 <span className="text-slate-400 font-medium">Email:</span>
+                                 <span className="text-slate-815 select-all font-bold">emmanuel.vance@gdcms.edu</span>
+                               </p>
+                               <p className="flex justify-between text-[11px]">
+                                 <span className="text-slate-400 font-medium">Session Key:</span>
+                                 <span className="text-slate-500 font-mono select-all">123456</span>
+                               </p>
+                             </div>
+                           </div>
+                           <button
+                             type="button"
+                             onClick={() => handleQuickLogin("L-9001")}
+                             className="mt-6 w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black uppercase tracking-wider rounded-lg transition-colors cursor-pointer"
+                           >
+                             Log in as Lecturer (Dr. Vance)
+                           </button>
+                         </div>
+
+                         {/* Admin Card */}
+                         <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col justify-between shadow-sm hover:shadow-md transition-all text-left">
+                           <div className="space-y-4">
+                             <div className="flex items-center gap-2">
+                               <span className="w-2 h-2 bg-purple-500 rounded-full"></span>
+                               <span className="text-[10px] uppercase font-black text-purple-700 tracking-wider">Coordinator Access</span>
+                             </div>
+                             <div className="space-y-1">
+                               <h4 className="font-black text-slate-900 text-base">Coordinator Admin</h4>
+                               <p className="text-xs text-slate-500 font-semibold leading-relaxed">Observe live system analytics logs, adjust nomenclature strings, and deploy changes.</p>
+                             </div>
+                             <div className="p-3 bg-slate-50 rounded-xl border border-slate-150 space-y-1.5 text-xs text-slate-600 font-semibold">
+                               <p className="flex justify-between">
+                                 <span className="text-slate-400 font-medium font-bold">Admin ID:</span>
+                                 <span className="text-slate-850 font-mono font-bold select-all">A-0001</span>
+                               </p>
+                               <p className="flex justify-between">
+                                 <span className="text-slate-400 font-medium">Email:</span>
+                                 <span className="text-slate-850 font-bold select-all">admin@gdcms.edu</span>
+                               </p>
+                               <p className="flex justify-between text-[11px]">
+                                 <span className="text-slate-400 font-medium">Session Key:</span>
+                                 <span className="text-slate-500 font-mono select-all font-bold">123456</span>
+                               </p>
+                             </div>
+                           </div>
+                           <button
+                             type="button"
+                             disabled
+                             className="mt-6 w-full py-2.5 bg-slate-100 text-slate-400 text-xs font-black uppercase tracking-wider rounded-lg transition-colors cursor-not-allowed"
+                           >
+                             Current Active Admin Session
+                           </button>
+                         </div>
+
+                       </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -2645,15 +3496,68 @@ export default function App() {
                             </div>
                           </div>
 
-                          <div className="shrink-0 flex flex-col gap-2">
-                            <a
-                              href={`/api/materials/download/${mat.id}`}
-                              download={mat.originalName}
-                              className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold p-2.5 rounded-2xl flex items-center justify-center transition-colors cursor-pointer pointer-events-auto"
-                              title="Secure AES-256 Decrypted Download"
+                          <div className="shrink-0 relative">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenMaterialMenuId(openMaterialMenuId === mat.id ? null : mat.id);
+                              }}
+                              className="p-2.5 hover:bg-slate-100 rounded-xl text-slate-400 hover:text-slate-705 text-slate-700 transition-colors cursor-pointer border border-transparent hover:border-slate-200"
+                              title="Material Actions"
                             >
-                              <Download className="w-4 h-4" />
-                            </a>
+                              <MoreVertical className="w-4 h-4" />
+                            </button>
+
+                            {openMaterialMenuId === mat.id && (
+                              <div className="absolute right-0 mt-1.5 w-52 bg-white border border-slate-200 rounded-2xl shadow-xl z-50 py-1.5 font-bold text-xs text-slate-705 text-slate-700 text-left animate-fade-in divide-y divide-slate-100">
+                                <div className="py-1">
+                                  <a
+                                    href={`/api/materials/download/${mat.id}`}
+                                    download={mat.originalName}
+                                    onClick={() => setOpenMaterialMenuId(null)}
+                                    className="w-full px-4 py-2 hover:bg-slate-50 flex items-center gap-2 transition-colors cursor-pointer text-slate-700 text-left font-bold"
+                                    title="Download and decrypt lecture files"
+                                  >
+                                    <Download className="w-3.5 h-3.5 text-indigo-600" />
+                                    <span>Download File</span>
+                                  </a>
+                                </div>
+                                <div className="py-1">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const shareText = `[GDCMS Material] ${mat.title} (${associatedCourse?.code || "Course Title"})\nDescription: ${mat.description || ""}\nDownload Link: ${window.location.origin}/api/materials/download/${mat.id}`;
+                                      navigator.clipboard.writeText(shareText).then(() => {
+                                        alert("Material details and reference link copied to clipboard successfully!");
+                                      }).catch(err => {
+                                        console.error("Clipboard write error:", err);
+                                      });
+                                      setOpenMaterialMenuId(null);
+                                    }}
+                                    className="w-full px-4 py-2 hover:bg-slate-50 flex items-center gap-2 transition-colors cursor-pointer text-slate-700 text-left font-bold"
+                                  >
+                                    <Share2 className="w-3.5 h-3.5 text-amber-500" />
+                                    <span>Share Material Info</span>
+                                  </button>
+                                </div>
+                                <div className="py-1">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      triggerNotificationPermissionRequest();
+                                      setOpenMaterialMenuId(null);
+                                    }}
+                                    className="w-full px-4 py-2 hover:bg-slate-50 flex items-center gap-2 transition-colors cursor-pointer text-slate-700 text-left font-bold"
+                                  >
+                                    <Bell className="w-3.5 h-3.5 text-emerald-500" />
+                                    <span>Enable Push Alerts</span>
+                                  </button>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
@@ -2838,6 +3742,8 @@ export default function App() {
               <div className="pointer-events-auto">
                 <DeadlineCalendar 
                   materials={materials} 
+                  googleToken={googleToken}
+                  onConnectGoogle={handleConnectGoogle}
                   onSelectAssignment={(asgId) => {
                     const el = document.getElementById(`assignment-${asgId}`);
                     if (el) {
@@ -3295,6 +4201,29 @@ export default function App() {
                       <Download className="w-4 h-4 text-white" />
                       <span>Export Selected ({selectedNoteIds.length}) to PDF</span>
                     </button>
+
+                    {googleToken ? (
+                      <button
+                        type="button"
+                        disabled={isExportingNotesToDrive}
+                        onClick={handleExportSelectedNotesToGoogleDrive}
+                        className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-extrabold text-xs uppercase tracking-wider px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 transition-all shadow-md shadow-emerald-600/10 cursor-pointer pointer-events-auto"
+                        title="Backup selected notes as text document in cloud Drive"
+                      >
+                        <Cloud className="w-4 h-4 text-white" />
+                        <span>{isExportingNotesToDrive ? "Uploading..." : `Export Selected (${selectedNoteIds.length}) to Drive`}</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleConnectGoogle}
+                        className="bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-205 font-bold text-xs uppercase tracking-wider px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+                        title="Authorize Google account access"
+                      >
+                        <span className="w-1.5 h-1.5 bg-rose-500 rounded-full animate-ping"></span>
+                        <span>Sync Google Drive</span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

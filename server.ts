@@ -755,6 +755,181 @@ app.post("/api/notifications/:id/read", authGuard, (req, res) => {
   }
 });
 
+// Delete Notification
+app.delete("/api/notifications/:id", authGuard, (req, res) => {
+  const user = (req as any).user;
+  const { id } = req.params;
+  const db = getDatabase();
+
+  const idx = db.notifications.findIndex(n => n.id === id && (n.userId === user.id || n.userId === "all"));
+  if (idx !== -1) {
+    db.notifications.splice(idx, 1);
+    writeDatabase(db);
+    res.json({ message: "Notification deleted successfully." });
+  } else {
+    res.status(404).json({ error: "Notification not found or access denied." });
+  }
+});
+
+// Edit Notification
+app.put("/api/notifications/:id", authGuard, (req, res) => {
+  const user = (req as any).user;
+  const { id } = req.params;
+  const { title, message } = req.body;
+  const db = getDatabase();
+
+  const notif = db.notifications.find(n => n.id === id && (n.userId === user.id || n.userId === "all"));
+  if (notif) {
+    if (title) notif.title = title;
+    if (message) notif.message = message;
+    writeDatabase(db);
+    res.json({ message: "Notification updated successfully.", notification: notif });
+  } else {
+    res.status(404).json({ error: "Notification not found or access denied." });
+  }
+});
+
+// ---------------------------------------------------------
+// GOOGLE OAUTH 2.0 FOR CALENDAR & DRIVE INTEGRATIONS
+// ---------------------------------------------------------
+app.get("/api/auth/google-url", (req, res) => {
+  const redirectUri = `${(process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "")}/auth/callback`;
+  const clientId = process.env.CLIENT_ID || process.env.GOOGLE_CLIENT_ID || "";
+  
+  if (!clientId) {
+    return res.status(500).json({ error: "Google OAuth Client ID is not configured in environment variables." });
+  }
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile",
+    access_type: "offline",
+    prompt: "consent"
+  });
+
+  res.json({ url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}` });
+});
+
+app.get(["/auth/callback", "/auth/callback/"], async (req, res) => {
+  const { code } = req.query;
+  const redirectUri = `${(process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "")}/auth/callback`;
+  const clientId = process.env.CLIENT_ID || process.env.GOOGLE_CLIENT_ID || "";
+  const clientSecret = process.env.CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET || "";
+
+  if (!code) {
+    return res.send(`<html><body><h3>Authorization code missing.</h3></body></html>`);
+  }
+
+  try {
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code: code as string,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+        grant_type: "authorization_code",
+      }),
+    });
+
+    const tokenData = await tokenResponse.json() as any;
+
+    if (!tokenResponse.ok || !tokenData.access_token) {
+      console.error("Exchange failed token data:", tokenData);
+      return res.send(`
+        <html>
+          <body style="font-family: sans-serif; padding: 20px;">
+            <h3 style="color: #ea4335;">Google Authorization Failed</h3>
+            <p>Could not exchange code for access token. Please check that CLIENT_ID and CLIENT_SECRET are configured correctly in the Google Cloud Console credential settings.</p>
+            <pre style="background: #f1f1f1; padding: 10px; border-radius: 5px;">${JSON.stringify(tokenData, null, 2)}</pre>
+          </body>
+        </html>
+      `);
+    }
+
+    // Return HTML that posts the token back to main window and closes the popup
+    return res.send(`
+      <html>
+        <head>
+          <title>Google Calendar & Drive Integration | GDCMS Auth Hub</title>
+          <script src="https://cdn.tailwindcss.com"></script>
+          <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+          <style>body { font-family: 'Inter', sans-serif; }</style>
+        </head>
+        <body class="bg-[#f0f4f9] min-h-screen flex items-center justify-center p-6 text-[#1e1e1e]">
+          <div class="w-full max-w-lg bg-white border border-slate-200/80 shadow-xl rounded-3xl p-8 text-center space-y-6">
+            <div class="inline-flex items-center justify-center w-16 h-16 bg-indigo-50 text-indigo-600 rounded-2xl mb-2">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-10 h-10">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 0 1-1.043 3.296 3.745 3.745 0 0 1-3.296 1.043A3.745 3.745 0 0 1 12 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 0 1-3.296-1.043 3.745 3.745 0 0 1-1.043-3.296A3.745 3.745 0 0 1 3 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 0 1 1.043-3.296 3.746 3.746 0 0 1 3.296-1.043A3.746 3.746 0 0 1 12 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 0 1 3.296 1.043 3.746 3.746 0 0 1 1.043 3.296A3.745 3.745 0 0 1 21 12Z" />
+              </svg>
+            </div>
+            
+            <div class="space-y-2">
+              <h2 class="text-2xl font-extrabold text-slate-805 text-slate-800">Connection Successful!</h2>
+              <p class="text-sm text-slate-500">Your Google academic ledger is now actively synced to GDCMS Secure Cloud.</p>
+            </div>
+
+            <div class="bg-indigo-50/50 rounded-2xl p-5 text-left border border-indigo-100">
+              <h3 class="text-xs font-bold uppercase tracking-wider text-indigo-700 mb-3">Key Connected Benefits:</h3>
+              <ul class="space-y-2.5 text-xs text-slate-600">
+                <li class="flex items-start gap-2">
+                  <span class="text-emerald-600 font-bold">✓</span>
+                  <span><strong>Automatic Calendar Syncing:</strong> Real-time assessment due dates, test coordinates, and assignment deadlines automatically push to your primary Google Calendar.</span>
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="text-emerald-600 font-bold">✓</span>
+                  <span><strong>Secure Note Ciphers Backups:</strong> Save, encrypt and export private study sandbox notes directly onto your Google Drive account with 1-click execution.</span>
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="text-emerald-600 font-bold">✓</span>
+                  <span><strong>Offline Reminders Pipeline:</strong> Native reminders remain operational via your Google account, keeping you notified 24/7 on any device (Android/iOS/Web).</span>
+                </li>
+              </ul>
+            </div>
+
+            <div class="text-xs text-slate-500 font-medium italic">
+              Transmitting secure symmetric tokens to primary GDCMS window...
+            </div>
+
+            <button onclick="closeNow()" class="w-full py-3 bg-indigo-650 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer">
+              Complete Sync & Close (<span id="seconds">5</span>s)
+            </button>
+
+            <script>
+              let secondsLeft = 5;
+              const timerEl = document.getElementById('seconds');
+              
+              function closeNow() {
+                if (window.opener) {
+                  window.opener.postMessage({ type: 'GOOGLE_AUTH_SUCCESS', token: '${tokenData.access_token}' }, '*');
+                  window.close();
+                } else {
+                  window.location.href = '/';
+                }
+              }
+
+              const interval = setInterval(() => {
+                secondsLeft--;
+                if (timerEl) timerEl.textContent = secondsLeft;
+                if (secondsLeft <= 0) {
+                  clearInterval(interval);
+                  closeNow();
+                }
+              }, 1000);
+            </script>
+          </div>
+        </body>
+      </html>
+    `);
+  } catch (err: any) {
+    console.error("Google Callback Error:", err);
+    return res.send(`<html><body><h3>Exception during Authorization: ${err.message}</h3></body></html>`);
+  }
+});
+
 // ---------------------------------------------------------
 // ADMINISTRATIVE CONFIGURATIONS, AUDIT LOGS & BROADCASTS
 // ---------------------------------------------------------
@@ -802,8 +977,67 @@ app.post("/api/admin/logs/clear", authGuard, (req, res) => {
   }
   const db = getDatabase();
   db.logs = [];
+  
+  // Clear any persistent sync logs from notification feed as well
+  if (db.notifications) {
+    db.notifications = db.notifications.filter(n => n.type !== "offline_sync");
+  }
+
+  // Treat log artifacts as temp files and delete them from workspace if they exist
+  try {
+    const fs = require("fs");
+    const path = require("path");
+    const files = fs.readdirSync(process.cwd());
+    files.forEach((file: string) => {
+      if (file.endsWith(".log") || file.startsWith("npm-debug") || file.endsWith(".tmp")) {
+        try {
+          fs.unlinkSync(path.join(process.cwd(), file));
+        } catch (e) {
+          // Ignore files that are locked or in use
+        }
+      }
+    });
+  } catch (err) {
+    console.error("Workspace temp log files purging skipped:", err);
+  }
+
   writeDatabase(db);
-  res.json({ message: "Authentication security audit logs successfully cleared." });
+  res.json({ message: "Recorded security audit logs and connection/sync logs cleared successfully (treated as temporary files)." });
+});
+
+app.get("/api/admin/users", authGuard, (req, res) => {
+  const user = (req as any).user;
+  if (user.role !== "admin") {
+    return res.status(403).json({ error: "Administrative console access required." });
+  }
+  const db = getDatabase();
+  const safeUsers = db.users.map(u => ({
+    id: u.id,
+    fullName: u.fullName,
+    email: u.email,
+    role: u.role,
+    indexNumber: u.indexNumber,
+    oauthConnected: u.oauthConnected
+  }));
+  res.json(safeUsers);
+});
+
+app.get("/api/lecturer/students", authGuard, (req, res) => {
+  const user = (req as any).user;
+  if (user.role !== "lecturer") {
+    return res.status(403).json({ error: "Lecturer portal access required." });
+  }
+  const db = getDatabase();
+  const students = db.users
+    .filter(u => u.role === "student")
+    .map(u => ({
+      id: u.id,
+      fullName: u.fullName,
+      email: u.email,
+      indexNumber: u.indexNumber,
+      oauthConnected: u.oauthConnected
+    }));
+  res.json(students);
 });
 
 app.post("/api/admin/broadcast-alert", authGuard, (req, res) => {

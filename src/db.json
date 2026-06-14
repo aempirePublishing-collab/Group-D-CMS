@@ -2,20 +2,20 @@
   "users": [
     {
       "id": "student_1",
-      "indexNumber": "10928374",
+      "indexNumber": "BC/ITN/25/147",
       "fullName": "Clement Koffie",
       "email": "koffieclement12@gmail.com",
       "role": "student",
-      "passwordHash": "$2b$10$Un6O0D1G5/gXwz5Sfe9iV.vEq8b6b0pXf68qN5d6J2Z6o2.kL94gW",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
       "oauthConnected": false
     },
     {
       "id": "student_2",
-      "indexNumber": "98765432",
+      "indexNumber": "BC/ITN/25/112",
       "fullName": "Sarah Jenkins",
       "email": "sarah.j@student.edu",
       "role": "student",
-      "passwordHash": "$2b$10$Un6O0D1G5/gXwz5Sfe9iV.vEq8b6b0pXf68qN5d6J2Z6o2.kL94gW",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
       "oauthConnected": false
     },
     {
@@ -24,7 +24,7 @@
       "fullName": "Dr. Emmanuel Vance",
       "email": "emmanuel.vance@gdcms.edu",
       "role": "lecturer",
-      "passwordHash": "$2b$10$Un6O0D1G5/gXwz5Sfe9iV.vEq8b6b0pXf68qN5d6J2Z6o2.kL94gW",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
       "oauthConnected": true
     },
     {
@@ -33,7 +33,7 @@
       "fullName": "Admin Coordinator",
       "email": "admin@gdcms.edu",
       "role": "admin",
-      "passwordHash": "$2b$10$Un6O0D1G5/gXwz5Sfe9iV.vEq8b6b0pXf68qN5d6J2Z6o2.kL94gW",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
       "oauthConnected": false
     }
   ],
@@ -99,7 +99,7 @@
       "id": "sub_1",
       "assignmentId": "mat_3",
       "studentId": "student_1",
-      "studentIndex": "10928374",
+      "studentIndex": "BC/ITN/25/147",
       "studentName": "Clement Koffie",
       "fileKey": "sub_socket_clement.enc",
       "originalName": "Koffie_ITN302_Assignment1.pdf",
@@ -138,7 +138,27 @@
       "message": "Dr. Vance uploaded Lecture Slide 1: Introduction to AES & DES Cryptography.",
       "type": "material",
       "createdAt": "2026-06-03T14:30:00Z",
-      "isRead": false
+      "isRead": true
     }
-  ]
+  ],
+  "logs": [
+    {
+      "id": "log_d498abeb-0fa9-422e-870a-b4367b5b7217",
+      "timestamp": "2026-06-14T00:03:52.612Z",
+      "emailOrIndex": "L-9001",
+      "status": "success",
+      "reason": "Interactive portal portal authorization granted",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+      "ipPlaceholder": "154.161.170.147, 169.254.169.126"
+    }
+  ],
+  "appConfig": {
+    "systemName": "Group D Class Management System",
+    "systemShort": "GDCMS",
+    "assignmentsTerm": "Assignments",
+    "materialsTerm": "Course Materials",
+    "themeColor": "indigo",
+    "fontSizePreset": "standard",
+    "sidebarStyle": "dark-navy"
+  }
 }
