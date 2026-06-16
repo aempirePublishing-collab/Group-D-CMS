@@ -12,7 +12,7 @@ dotenv.config();
 // SQL database and Drizzle schema imports
 import { db } from "./src/db/index.ts";
 import * as schema from "./src/db/schema.ts";
-import { eq, or, and, desc } from "drizzle-orm";
+import { eq, or, and, desc, sql } from "drizzle-orm";
 
 const app = express();
 const PORT = 3000;
@@ -103,9 +103,131 @@ function decryptText(encryptedText: string): string {
 }
 
 // ---------------------------------------------------------
+// SQL Schema Dynamically/Self-Healing Auto-Bootstrap
+// ---------------------------------------------------------
+async function ensureDatabaseSchema() {
+  console.log("[GDCMS] Initiating database schema self-healing/integrity check...");
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        index_number TEXT,
+        full_name TEXT NOT NULL,
+        email TEXT NOT NULL,
+        role TEXT NOT NULL,
+        password_hash TEXT,
+        oauth_connected BOOLEAN DEFAULT false,
+        needs_password_change BOOLEAN DEFAULT false
+      );
+    `);
+    
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS courses (
+        id TEXT PRIMARY KEY,
+        code TEXT NOT NULL,
+        name TEXT NOT NULL,
+        lecturer_id TEXT NOT NULL,
+        description TEXT NOT NULL,
+        outline_url TEXT,
+        outline_name TEXT
+      );
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS materials (
+        id TEXT PRIMARY KEY,
+        course_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        type TEXT NOT NULL,
+        uploaded_by TEXT NOT NULL,
+        uploaded_at TEXT NOT NULL,
+        file_key TEXT NOT NULL,
+        original_name TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        file_size INTEGER NOT NULL,
+        deadline TEXT
+      );
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS submissions (
+        id TEXT PRIMARY KEY,
+        assignment_id TEXT NOT NULL,
+        student_id TEXT NOT NULL,
+        student_index TEXT NOT NULL,
+        student_name TEXT NOT NULL,
+        file_key TEXT NOT NULL,
+        original_name TEXT NOT NULL,
+        uploaded_at TEXT NOT NULL,
+        grade TEXT,
+        feedback TEXT,
+        graded_by TEXT,
+        graded_at TEXT,
+        status TEXT NOT NULL
+      );
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS notes (
+        id TEXT PRIMARY KEY,
+        student_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        is_synced BOOLEAN DEFAULT true,
+        tag TEXT
+      );
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        type TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        is_read BOOLEAN DEFAULT false
+      );
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS logs (
+        id TEXT PRIMARY KEY,
+        timestamp TEXT NOT NULL,
+        email_or_index TEXT NOT NULL,
+        status TEXT NOT NULL,
+        reason TEXT,
+        user_agent TEXT,
+        ip_placeholder TEXT
+      );
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS app_config (
+        id TEXT PRIMARY KEY,
+        system_name TEXT NOT NULL,
+        system_short TEXT NOT NULL,
+        assignments_term TEXT NOT NULL,
+        materials_term TEXT NOT NULL,
+        theme_color TEXT NOT NULL,
+        font_size_preset TEXT NOT NULL,
+        sidebar_style TEXT NOT NULL
+      );
+    `);
+
+    console.log("[GDCMS] Database tables verified or created successfully.");
+  } catch (error) {
+    console.error("[GDCMS] Critical database schema auto-generation failed or exists:", error);
+  }
+}
+
+// ---------------------------------------------------------
 // SQL Seed Engine (Graceful Data Porting & Seeding)
 // ---------------------------------------------------------
 async function seedDatabaseIfNeeded() {
+  await ensureDatabaseSchema();
   try {
     const existingUsers = await db.select().from(schema.users).limit(1);
     if (existingUsers.length === 0) {
