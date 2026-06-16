@@ -10,6 +10,7 @@ export interface User {
   role: UserRole;
   passwordHash?: string;
   oauthConnected?: boolean;
+  needsPasswordChange?: boolean;
 }
 
 export interface Course {
@@ -60,6 +61,9 @@ export interface PersonalNote {
   content: string; // Stored encrypted on backend, decrypted on fetch
   updatedAt: string;
   isSynced: boolean; // Tracking offline outbox
+  tag?: string;
+  keepColor?: string; // Google Keep custom sticky card background color
+  isPinned?: boolean; // Keep pinned status
 }
 
 export interface NotificationItem {

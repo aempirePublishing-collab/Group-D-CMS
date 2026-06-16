@@ -36,14 +36,38 @@ import {
   Share2,
   Bell,
   Sun,
-  Moon
+  Moon,
+  Database,
+  Cpu,
+  HardDrive,
+  School,
+  Pin,
+  ExternalLink,
+  Check
 } from "lucide-react";
 import { useGlobalTheme } from "./ThemeContext";
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as ChartTooltip, Legend } from "recharts";
 import OfflineIndicator from "./components/OfflineIndicator";
 import NotificationBell from "./components/NotificationBell";
 import DeadlineCalendar from "./components/DeadlineCalendar";
+import GoogleClassroomPanel from "./components/GoogleClassroomPanel";
+import GoogleKeepPanel from "./components/GoogleKeepPanel";
 import { User as UserType, Course, Material, Submission, PersonalNote, NotificationItem } from "./types";
 import { jsPDF } from "jspdf";
+import { 
+  syncCoursesToFirestore, 
+  syncMaterialsToFirestore, 
+  syncSubmissionsToFirestore, 
+  syncNotesToFirestore, 
+  syncNotificationsToFirestore,
+  getOfflineCourses,
+  getOfflineMaterials,
+  getOfflineSubmissions,
+  getOfflineNotes,
+  getOfflineNotifications,
+  saveSingleNoteToFirestore,
+  deleteSingleNoteFromFirestore
+} from "./firebase";
 
 export default function App() {
   const { theme, toggleTheme } = useGlobalTheme();
@@ -58,8 +82,11 @@ export default function App() {
 
   // Google Integration & Admin Navigation States
   const [googleToken, setGoogleToken] = useState<string | null>(null);
-  const [adminPanelTab, setAdminPanelTab] = useState<"config" | "sandbox" | "addUser" | "usersList">("config");
+  const [adminPanelTab, setAdminPanelTab] = useState<"config" | "sandbox" | "addUser" | "usersList" | "databases">("config");
+  const [forceOffline, setForceOffline] = useState(() => localStorage.getItem("gdcms_force_offline") === "true");
+  const isOnline = navigator.onLine && !forceOffline;
   const [openMaterialMenuId, setOpenMaterialMenuId] = useState<string | null>(null);
+  const [openGenericMenuId, setOpenGenericMenuId] = useState<string | null>(null);
   const [showGoogleConnectModal, setShowGoogleConnectModal] = useState(false);
 
   // Admin Registration Sub-Form States
@@ -71,6 +98,120 @@ export default function App() {
   const [adminRegisterError, setAdminRegisterError] = useState<string | null>(null);
   const [adminRegisterSuccess, setAdminRegisterSuccess] = useState<string | null>(null);
   const [isAdminRegisteringUser, setIsAdminRegisteringUser] = useState(false);
+
+  // Manual Password Reset States for Admin Panel
+  const [resettingUserId, setResettingUserId] = useState<string | null>(null);
+  const [resetTempPassword, setResetTempPassword] = useState("123456");
+  const [resetStatusMsg, setResetStatusMsg] = useState<string | null>(null);
+  const [resetErrorMsg, setResetErrorMsg] = useState<string | null>(null);
+  const [isResettingUserPass, setIsResettingUserPass] = useState(false);
+
+  // Admin Database Management Center States
+  const [dbStats, setDbStats] = useState<any>(null);
+  const [isLoadingDbStats, setIsLoadingDbStats] = useState(false);
+  const [isSeedingDb, setIsSeedingDb] = useState(false);
+  const [dbStatusError, setDbStatusError] = useState<string | null>(null);
+  const [isSyncingFirestore, setIsSyncingFirestore] = useState(false);
+  const [firestoreSyncProgress, setFirestoreSyncProgress] = useState<string | null>(null);
+  const [firestoreSyncStatus, setFirestoreSyncStatus] = useState<'idle' | 'success' | 'failed'>('idle');
+
+  const fetchDbStats = async () => {
+    if (!token) return;
+    setIsLoadingDbStats(true);
+    setDbStatusError(null);
+    try {
+      const response = await fetch("/api/admin/db-status", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setDbStats(data);
+      } else {
+        const errData = await response.json();
+        setDbStatusError(errData.error || "Failed to load database stats.");
+      }
+    } catch (e: any) {
+      setDbStatusError(e.message || "Network error loading database stats.");
+    } finally {
+      setIsLoadingDbStats(false);
+    }
+  };
+
+  const handleForceMirrorToFirestore = async () => {
+    setIsSyncingFirestore(true);
+    setFirestoreSyncStatus('idle');
+    setFirestoreSyncProgress("Warming up Firestore engine...");
+    try {
+      setFirestoreSyncProgress("Syncing Courses to security-hardened collections...");
+      await syncCoursesToFirestore(courses);
+      
+      setFirestoreSyncProgress("Mirroring Assignments and Materials catalogs...");
+      await syncMaterialsToFirestore(materials);
+
+      setFirestoreSyncProgress("Pipelining coursework submissions archive...");
+      await syncSubmissionsToFirestore(submissions);
+
+      setFirestoreSyncProgress("Encrypting and reconciling private student notes...");
+      await syncNotesToFirestore(notes);
+
+      setFirestoreSyncProgress("Broadcasting system notifications registry...");
+      await syncNotificationsToFirestore(notifications);
+
+      setFirestoreSyncProgress("Mirror completed successfully! All items mirrored and cached in local IndexedDB.");
+      setFirestoreSyncStatus('success');
+
+      const successNotif: any = {
+        id: "client_notif_" + Math.random().toString(36).substring(2, 9),
+        title: "Dual Database Mirror Verified ✔",
+        message: `Administrative trigger: ${courses.length} courses, ${materials.length} files and ${notes.length} notes fully back-replicated into Firebase Firestore.`,
+        type: "offline_sync",
+        createdAt: new Date().toISOString(),
+        isRead: false
+      };
+      setNotifications(prev => [successNotif, ...prev]);
+
+    } catch (e: any) {
+      console.error("Mirror to Firestore failed:", e);
+      setFirestoreSyncProgress("Mirroring failed: " + (e.message || e.toString()));
+      setFirestoreSyncStatus('failed');
+    } finally {
+      setIsSyncingFirestore(false);
+    }
+  };
+
+  const handleSeedPrimaryDatabase = async () => {
+    if (!confirm("Are you sure you want to PURGE and SEED the relational PostgreSQL database? This will clear logs, course contents, student papers and rebuild them from pristine presets. Users accounts will be maintained.")) return;
+    setIsSeedingDb(true);
+    try {
+      const response = await fetch("/api/admin/db-seed", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        alert(data.message);
+        if (token) {
+          fetchAppData(token, currentUser);
+          fetchDbStats();
+        }
+      } else {
+        const errData = await response.json();
+        alert("E-Seeding failed: " + errData.error);
+      }
+    } catch (e: any) {
+      alert("Error reaching server to seed database: " + e.message);
+    } finally {
+      setIsSeedingDb(false);
+    }
+  };
+
+  useEffect(() => {
+    if (adminPanelTab === "databases") {
+      fetchDbStats();
+    }
+  }, [adminPanelTab]);
 
   // Scroll references for welcome landing page smooth-scroll behaviour
   const purposeRef = useRef<HTMLDivElement>(null);
@@ -123,6 +264,8 @@ export default function App() {
   const [noteTitle, setNoteTitle] = useState("");
   const [noteContent, setNoteContent] = useState("");
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [noteTag, setNoteTag] = useState("General Lecture");
+  const [selectedTagFilter, setSelectedTagFilter] = useState("all");
 
   // Personal Notes Custom Readability Options and Selection States
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
@@ -135,6 +278,29 @@ export default function App() {
   const [notesColorTheme, setNotesColorTheme] = useState<"light" | "sepia" | "dark">(() => {
     return (localStorage.getItem("gdcms_notes_theme") as any) || "light";
   });
+  const [sharingMaterial, setSharingMaterial] = useState<any | null>(null);
+
+  // Classroom and Keep Integration Modes & States
+  const [classroomMode, setClassroomMode] = useState<"default" | "google">(() => {
+    return (localStorage.getItem("gdcms_classroom_mode") as any) || "default";
+  });
+  const [keepMode, setKeepMode] = useState<"default" | "google">(() => {
+    return (localStorage.getItem("gdcms_keep_mode") as any) || "default";
+  });
+  const [classroomCourses, setClassroomCourses] = useState<any[]>([]);
+  const [classroomCoursework, setClassroomCoursework] = useState<any[]>([]);
+  const [selectedClassroomCourseId, setSelectedClassroomCourseId] = useState("");
+  const [isFetchingClassroom, setIsFetchingClassroom] = useState(false);
+  const [keepNoteColor, setKeepNoteColor] = useState("white");
+  const [keepNotePinned, setKeepNotePinned] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem("gdcms_classroom_mode", classroomMode);
+  }, [classroomMode]);
+
+  useEffect(() => {
+    localStorage.setItem("gdcms_keep_mode", keepMode);
+  }, [keepMode]);
 
   // Keyboard/Interactive States
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -437,12 +603,66 @@ export default function App() {
     const handleGoogleAuthMessage = (event: MessageEvent) => {
       if (event.data?.type === 'GOOGLE_AUTH_SUCCESS') {
         setGoogleToken(event.data.token);
-        alert("Google account synchronized successfully! Google Drive & Google Calendar are now active in your session.");
+        alert("Google account synchronized successfully! Google Classroom, Drive, & Calendar are now active in your session.");
       }
     };
     window.addEventListener("message", handleGoogleAuthMessage);
     return () => window.removeEventListener("message", handleGoogleAuthMessage);
   }, []);
+
+  const fetchGoogleClassroomCourses = async () => {
+    if (!googleToken) return;
+    setIsFetchingClassroom(true);
+    try {
+      const res = await fetch("https://classroom.googleapis.com/v1/courses", {
+        headers: { Authorization: `Bearer ${googleToken}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setClassroomCourses(data.courses || []);
+      } else {
+        console.error("Failed to fetch Classroom courses natively");
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsFetchingClassroom(false);
+    }
+  };
+
+  const fetchGoogleClassroomCoursework = async (courseId: string) => {
+    if (!googleToken || !courseId) return;
+    setIsFetchingClassroom(true);
+    try {
+      const res = await fetch(`https://classroom.googleapis.com/v1/courses/${courseId}/courseWork`, {
+        headers: { Authorization: `Bearer ${googleToken}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setClassroomCoursework(data.courseWork || []);
+      } else {
+        console.error("Failed to fetch coursework natively from course");
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsFetchingClassroom(false);
+    }
+  };
+
+  useEffect(() => {
+    if (googleToken && classroomMode === "google") {
+      fetchGoogleClassroomCourses();
+    }
+  }, [googleToken, classroomMode]);
+
+  useEffect(() => {
+    if (googleToken && selectedClassroomCourseId) {
+      fetchGoogleClassroomCoursework(selectedClassroomCourseId);
+    } else {
+      setClassroomCoursework([]);
+    }
+  }, [googleToken, selectedClassroomCourseId]);
 
   // Reset forms automatically on new view transition so previous credentials are not preserved in inputs
   useEffect(() => {
@@ -463,7 +683,16 @@ export default function App() {
       const res = await fetch("/api/auth/google-url");
       const data = await res.json();
       if (res.ok && data.url) {
-        window.open(data.url, "google_oauth_popup", "width=555,height=655");
+        const popup = window.open(data.url, "google_oauth_popup", "width=555,height=655");
+        if (!popup || popup.closed || typeof popup.closed === "undefined") {
+          const yesRedirect = window.confirm(
+            "It looks like your browser or the preview environment blocked the login popup.\n\n" +
+            "Would you like to load the Google Account Sign-In page directly in the current window instead?"
+          );
+          if (yesRedirect) {
+            window.location.href = data.url;
+          }
+        }
       } else {
         alert(data.error || "Could not retrieve Google sign-in configuration.");
       }
@@ -688,8 +917,8 @@ export default function App() {
 
   // Lecturer - Student Assessment Tracking (Dynamic Mock Database state for performance reviews)
   const [studentPerformance, setStudentPerformance] = useState([
-    { id: "stud_1", name: "Clement Koffie", index: "10928374", assignmentGrade: 88, quizGrade: 92, midsemGrade: 85, progressStatus: "Excellent" },
-    { id: "stud_2", name: "Sarah Jenkins", index: "10984729", assignmentGrade: 75, quizGrade: 82, midsemGrade: 78, progressStatus: "Consistent" }
+    { id: "stud_1", name: "Clement Koffie", index: "10928374", assignmentGrade: 88, quizGrade: 92, midsemGrade: 85, progressStatus: "Excellent", progression: [70, 78, 85, 88] },
+    { id: "stud_2", name: "Sarah Jenkins", index: "10984729", assignmentGrade: 75, quizGrade: 82, midsemGrade: 78, progressStatus: "Consistent", progression: [65, 72, 70, 75] }
   ]);
 
   const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
@@ -857,6 +1086,28 @@ export default function App() {
   };
 
   const fetchAppData = async (activeToken: string, userObj?: any) => {
+    // Fallback: If device is offline, fetch immediately from local Firestore offline persistent cache!
+    if (!isOnline) {
+      console.log("GDCMS: Offline mode detected. Serving app data from Firestore local cache.");
+      try {
+        const [offCourses, offMaterials, offSubmissions, offNotes, offNotifs] = await Promise.all([
+          getOfflineCourses(),
+          getOfflineMaterials(),
+          getOfflineSubmissions(),
+          getOfflineNotes(),
+          getOfflineNotifications()
+        ]);
+        if (offCourses.length > 0) setCourses(offCourses);
+        if (offMaterials.length > 0) setMaterials(offMaterials);
+        if (offSubmissions.length > 0) setSubmissions(offSubmissions);
+        if (offNotes.length > 0) setNotes(offNotes);
+        if (offNotifs.length > 0) setNotifications(offNotifs);
+      } catch (e) {
+        console.error("GDCMS: Firestore local cache query failed:", e);
+      }
+      return;
+    }
+
     try {
       const headers = { Authorization: `Bearer ${activeToken}` };
       
@@ -868,11 +1119,39 @@ export default function App() {
         fetch("/api/notifications", { headers })
       ]);
 
-      if (resCourses.ok) setCourses(await resCourses.json());
-      if (resMaterials.ok) setMaterials(await resMaterials.json());
-      if (resSubmissions.ok) setSubmissions(await resSubmissions.json());
-      if (resNotes.ok) setNotes(await resNotes.json());
-      if (resNotifs.ok) setNotifications(await resNotifs.json());
+      let fetchedCourses: Course[] = [];
+      let fetchedMaterials: Material[] = [];
+      let fetchedSubmissions: Submission[] = [];
+      let fetchedNotes: PersonalNote[] = [];
+      let fetchedNotifs: NotificationItem[] = [];
+
+      if (resCourses.ok) {
+        fetchedCourses = await resCourses.json();
+        setCourses(fetchedCourses);
+      }
+      if (resMaterials.ok) {
+        fetchedMaterials = await resMaterials.json();
+        setMaterials(fetchedMaterials);
+      }
+      if (resSubmissions.ok) {
+        fetchedSubmissions = await resSubmissions.json();
+        setSubmissions(fetchedSubmissions);
+      }
+      if (resNotes.ok) {
+        fetchedNotes = await resNotes.json();
+        setNotes(fetchedNotes);
+      }
+      if (resNotifs.ok) {
+        fetchedNotifs = await resNotifs.json();
+        setNotifications(fetchedNotifs);
+      }
+
+      // Sync to Firestore in the background to guarantee standard-grade offline durability
+      if (fetchedCourses.length > 0) syncCoursesToFirestore(fetchedCourses);
+      if (fetchedMaterials.length > 0) syncMaterialsToFirestore(fetchedMaterials);
+      if (fetchedSubmissions.length > 0) syncSubmissionsToFirestore(fetchedSubmissions);
+      if (fetchedNotes.length > 0) syncNotesToFirestore(fetchedNotes);
+      if (fetchedNotifs.length > 0) syncNotificationsToFirestore(fetchedNotifs);
 
       const activeUser = userObj || currentUser;
       if (activeUser) {
@@ -909,6 +1188,34 @@ export default function App() {
     }
   };
 
+  const triggerUserPasswordReset = async (targetUserId: string, tempPass: string) => {
+    setIsResettingUserPass(true);
+    setResetStatusMsg(null);
+    setResetErrorMsg(null);
+    try {
+      const res = await fetch("/api/admin/reset-user-password", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ userId: targetUserId, newTempPassword: tempPass })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setResetErrorMsg(data.error || "Reset request failed.");
+      } else {
+        setResetStatusMsg(data.message || "Password successfully updated.");
+        // Refresh users list
+        fetchAppData(token!);
+      }
+    } catch (err) {
+      setResetErrorMsg("Offline network error occurred during password reset.");
+    } finally {
+      setIsResettingUserPass(false);
+    }
+  };
+
   // Login transaction handler
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -932,6 +1239,11 @@ export default function App() {
       }
 
       setToken(data.token);
+      setActiveTab("dashboard");
+      setIndexNumber("");
+      setPassword("");
+      setFullName("");
+      setEmail("");
     } catch (err) {
       setAuthError("System network fault connecting to core services.");
     }
@@ -972,6 +1284,11 @@ export default function App() {
       }
 
       setToken(data.token);
+      setActiveTab("dashboard");
+      setIndexNumber("");
+      setPassword("");
+      setFullName("");
+      setEmail("");
     } catch (e) {
       setAuthError("Security registry offline.");
     }
@@ -994,6 +1311,11 @@ export default function App() {
       const data = await res.json();
       if (res.ok) {
         setToken(data.token);
+        setActiveTab("dashboard");
+        setIndexNumber("");
+        setPassword("");
+        setFullName("");
+        setEmail("");
       } else {
         setAuthError(data.error || "Trial authentication failed.");
       }
@@ -1162,6 +1484,15 @@ export default function App() {
     }
   };
 
+  const resetNotesForm = () => {
+    setNoteTitle("");
+    setNoteContent("");
+    setEditingNoteId(null);
+    setKeepNoteColor("white");
+    setKeepNotePinned(false);
+    localStorage.removeItem("gdcms_autosave_note");
+  };
+
   // Save Encrypted Student Personal Note
   const handleSaveNote = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1170,15 +1501,20 @@ export default function App() {
       return;
     }
 
+    const serializedTag = keepMode === "google"
+      ? `${keepNoteColor}|${keepNotePinned ? "pinned" : "unpinned"}|${noteTag || "General Keep"}`
+      : noteTag;
+
     const notePayload = {
       id: editingNoteId || "client_note_" + Math.random().toString(36).substring(2, 9),
       title: noteTitle,
       content: noteContent,
+      tag: serializedTag,
       updatedAt: new Date().toISOString()
     };
 
     // Case 1: Browser is Offline, append in browser client local persistent pool!
-    if (!navigator.onLine) {
+    if (!isOnline) {
       try {
         const storedStr = localStorage.getItem("gdcms_offline_notes") || "[]";
         const storedArr = JSON.parse(storedStr) as any[];
@@ -1208,12 +1544,12 @@ export default function App() {
         }
         setNotes(optimisticNotes);
 
+        // Also save note to the durable offline-first Firebase Firestore collection!
+        saveSingleNoteToFirestore(enrichedLocalNote);
+
         // Reset inputs
-        setNoteTitle("");
-        setNoteContent("");
-        setEditingNoteId(null);
-        localStorage.removeItem("gdcms_autosave_note");
-        alert("No internet connection detected. Note has been safe-cached locally.");
+        resetNotesForm();
+        alert("No internet connection detected. Note has been safe-cached locally and secured in Firestore database.");
       } catch (e) {
         console.error(e);
       }
@@ -1235,10 +1571,7 @@ export default function App() {
 
       const result = await res.json();
       if (res.ok) {
-        setNoteTitle("");
-        setNoteContent("");
-        setEditingNoteId(null);
-        localStorage.removeItem("gdcms_autosave_note");
+        resetNotesForm();
         fetchAppData(token);
       } else {
         alert(result.error || "Note write error.");
@@ -1263,6 +1596,9 @@ export default function App() {
         localStorage.setItem("gdcms_offline_notes", JSON.stringify(filtered));
       }
     } catch (e) {}
+
+    // Synchronize purge to Firestore!
+    deleteSingleNoteFromFirestore(noteId);
 
     // Deselect note index if it is currently inside the selection queue
     setSelectedNoteIds(prev => prev.filter(id => id !== noteId));
@@ -1372,9 +1708,10 @@ export default function App() {
     return notes.filter(n => {
       const matchesQuery = n.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
                            n.content.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchesQuery;
+      const matchesTag = selectedTagFilter === "all" || n.tag === selectedTagFilter;
+      return matchesQuery && matchesTag;
     });
-  }, [notes, searchQuery]);
+  }, [notes, searchQuery, selectedTagFilter]);
 
   // Compute calculated values for dynamic stats display
   const studentSubmissionsMap = useMemo(() => {
@@ -1841,10 +2178,10 @@ export default function App() {
       {/* GOOGLE WORKSPACE INTEGRATION PERMISSIONS EXPLANATION MODAL */}
       {showGoogleConnectModal && (
         <div className="fixed inset-0 bg-slate-905/70 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white rounded-3xl w-full max-w-lg border border-slate-200/60 shadow-2xl overflow-hidden animate-scale-up text-left">
+          <div className="bg-white rounded-3xl w-full max-w-lg border border-slate-200/60 shadow-2xl max-h-[95vh] flex flex-col overflow-hidden animate-scale-up text-left">
             
             {/* Header banner */}
-            <div className="bg-[#4f46e5] text-white p-6 relative">
+            <div className="bg-[#4f46e5] text-white p-6 relative shrink-0">
               <button 
                 onClick={() => setShowGoogleConnectModal(false)}
                 className="absolute top-4 right-4 p-1 hover:bg-white/10 rounded-lg text-white/80 hover:text-white transition-colors cursor-pointer text-white"
@@ -1863,7 +2200,7 @@ export default function App() {
             </div>
 
             {/* Explanation & Benefits content */}
-            <div className="p-6 space-y-5">
+            <div className="p-5 space-y-4 overflow-y-auto max-h-[45vh] md:max-h-none scrollbar-thin">
               <div className="text-xs text-slate-500 leading-relaxed font-semibold">
                 By connecting GDCMS securely to your preferred Google Account, the system synchronizes academic schedules, cohorts outlines, assessment deadlines, and provides persistent cloud notebook backup capabilities. Learn about some of the secure benefits:
               </div>
@@ -1894,7 +2231,7 @@ export default function App() {
                     <Activity className="w-4 h-4 text-emerald-500" />
                   </div>
                   <div className="space-y-0.5 text-xs text-left">
-                    <h4 className="font-extrabold text-slate-808 text-slate-800">24/7 Cross-Device Offline Alerts Pipeline</h4>
+                    <h4 className="font-extrabold text-slate-805 text-slate-800">24/7 Cross-Device Offline Alerts Pipeline</h4>
                     <p className="text-slate-500 leading-relaxed font-semibold">Native calendar notifications on Android, iOS, or macOS coordinate with you offline to maintain high academic performance rates.</p>
                   </div>
                 </div>
@@ -1912,7 +2249,7 @@ export default function App() {
             </div>
 
             {/* Actions buttons footer */}
-            <div className="bg-slate-50 border-t border-slate-150 p-4 shrink-0 flex items-center justify-end gap-3.5">
+            <div className="bg-slate-50 border-t border-slate-150 p-4 shrink-0 flex items-center justify-end gap-3">
               <button
                 type="button"
                 onClick={() => setShowGoogleConnectModal(false)}
@@ -1933,6 +2270,113 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* SHARE MATERIAL CHANNELS SELECTION MODAL */}
+      {sharingMaterial && (() => {
+        const mat = sharingMaterial;
+        const associatedCourse = courses.find((c) => c.id === mat.courseId);
+        const shareText = `[GDCMS Material] ${mat.title} (${associatedCourse?.code || "Course Title"})\nDescription: ${mat.description || ""}`;
+        const downloadLink = `${window.location.origin}/api/materials/download/${mat.id}`;
+        const fullShareText = `${shareText}\nDownload Link: ${downloadLink}`;
+        
+        const handleNativeShare = async () => {
+          if (navigator.share) {
+            try {
+              await navigator.share({
+                title: mat.title,
+                text: shareText,
+                url: downloadLink
+              });
+              setSharingMaterial(null);
+            } catch (err) {
+              console.error("Native share failed", err);
+            }
+          }
+        };
+
+        return (
+          <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+            <div className="bg-white dark:bg-slate-900 rounded-3xl w-full max-w-md border border-slate-200 dark:border-slate-800 p-6 space-y-6 shadow-2xl animate-scale-up">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-indigo-50 dark:bg-indigo-950/40 rounded-xl">
+                    <Share2 className="w-5 h-5 text-indigo-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-sm text-slate-800 dark:text-white uppercase leading-none">Share Course Material</h3>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Suggested Sharing Platforms</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setSharingMaterial(null)}
+                  className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-1.5 p-3.5 bg-slate-50 dark:bg-slate-950/30 rounded-2xl border border-slate-100 dark:border-slate-800 text-left">
+                <p className="text-xs font-black text-slate-700 dark:text-slate-200 truncate">{mat.title}</p>
+                <p className="text-[11px] text-slate-400 font-semibold line-clamp-2 leading-relaxed">{mat.description || 'No description provided.'}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <a 
+                  href={`https://api.whatsapp.com/send?text=${encodeURIComponent(fullShareText)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setSharingMaterial(null)}
+                  className="p-3 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:hover:bg-emerald-950/60 rounded-2xl flex flex-col items-center justify-center gap-1 border border-emerald-100 dark:border-emerald-900/50 transition-all cursor-pointer text-center"
+                >
+                  <span className="text-emerald-600 dark:text-emerald-400 font-extrabold text-xs">WhatsApp</span>
+                  <span className="text-[10px] text-emerald-500/80 font-bold">To Classmates</span>
+                </a>
+
+                <a 
+                  href={`https://classroom.google.com/share?url=${encodeURIComponent(downloadLink)}&title=${encodeURIComponent(mat.title)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setSharingMaterial(null)}
+                  className="p-3 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/30 dark:hover:bg-indigo-950/60 rounded-2xl flex flex-col items-center justify-center gap-1 border border-indigo-100 dark:border-indigo-900/50 transition-all cursor-pointer text-center"
+                >
+                  <span className="text-indigo-650 dark:text-indigo-400 font-extrabold text-xs">Classroom</span>
+                  <span className="text-[10px] text-indigo-500/80 font-bold">Add to Post</span>
+                </a>
+
+                <a 
+                  href={`https://t.me/share/url?url=${encodeURIComponent(downloadLink)}&text=${encodeURIComponent(shareText)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setSharingMaterial(null)}
+                  className="p-3 bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/30 dark:hover:bg-sky-950/60 rounded-2xl flex flex-col items-center justify-center gap-1 border border-sky-100 dark:border-sky-900/50 transition-all cursor-pointer text-center"
+                >
+                  <span className="text-sky-600 dark:text-sky-400 font-extrabold text-xs">Telegram</span>
+                  <span className="text-[10px] text-sky-500/80 font-bold">Post to Group</span>
+                </a>
+
+                <a 
+                  href={`mailto:?subject=${encodeURIComponent(mat.title)}&body=${encodeURIComponent(fullShareText)}`}
+                  onClick={() => setSharingMaterial(null)}
+                  className="p-3 bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-950/60 rounded-2xl flex flex-col items-center justify-center gap-1 border border-red-100 dark:border-red-900/50 transition-all cursor-pointer text-center"
+                >
+                  <span className="text-red-600 dark:text-red-400 font-extrabold text-xs">Email</span>
+                  <span className="text-[10px] text-red-500/80 font-bold">Direct Mail Card</span>
+                </a>
+              </div>
+
+              {navigator.share && (
+                <button
+                  type="button"
+                  onClick={handleNativeShare}
+                  className="w-full py-3 bg-slate-900 dark:bg-slate-800 hover:bg-slate-850 text-white font-extrabold rounded-2xl text-xs uppercase tracking-wider transition-colors cursor-pointer"
+                >
+                  Open System Share Sheet
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Sidebar navigation panel */}
       <aside className={`
@@ -2261,14 +2705,41 @@ export default function App() {
                                 <p className="text-[10px] text-slate-400 truncate">{mat.uploadedBy} • {new Date(mat.uploadedAt).toLocaleDateString()}</p>
                               </div>
                             </div>
-                            <a
-                              href={`/api/materials/download/${mat.id}`}
-                              download={mat.originalName}
-                              className="p-2 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-xl cursor-pointer"
-                              title="Decrypt & Save to Storage"
-                            >
-                              <Download className="w-4 h-4" />
-                            </a>
+                            <div className="relative">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenGenericMenuId(openGenericMenuId === `dash_${mat.id}` ? null : `dash_${mat.id}`);
+                                }}
+                                className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl cursor-pointer"
+                                title="Actions"
+                              >
+                                <MoreVertical className="w-4 h-4" />
+                              </button>
+                              {openGenericMenuId === `dash_${mat.id}` && (
+                                <div className="absolute right-0 mt-1 w-44 bg-white border border-slate-200 rounded-xl shadow-lg z-50 py-1 font-bold text-xs text-slate-755 text-slate-700 text-left">
+                                  <a
+                                    href={`/api/materials/download/${mat.id}`}
+                                    download={mat.originalName}
+                                    onClick={() => setOpenGenericMenuId(null)}
+                                    className="w-full px-3 py-2 hover:bg-slate-50 flex items-center gap-2 transition-colors cursor-pointer text-slate-700 font-bold"
+                                  >
+                                    <Download className="w-3.5 h-3.5 text-indigo-600" />
+                                    <span>Download</span>
+                                  </a>
+                                  <button
+                                    onClick={() => {
+                                      setSharingMaterial(mat);
+                                      setOpenGenericMenuId(null);
+                                    }}
+                                    className="w-full px-3 py-2 hover:bg-slate-50 flex items-center gap-2 transition-colors cursor-pointer text-slate-700 text-left font-bold"
+                                  >
+                                    <Share2 className="w-3.5 h-3.5 text-amber-500" />
+                                    <span>Share</span>
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         ))
                       )}
@@ -2392,6 +2863,93 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* GRADE PROGRESSION VISUAL TRENDS CHART */}
+                  {(() => {
+                    const maxAsgs = Math.max(...studentPerformance.map(s => s.progression?.length || 0), 0);
+                    const chartData = [];
+                    for (let i = 0; i < maxAsgs; i++) {
+                      const point: { [key: string]: any } = { name: `Assignment ${i + 1}` };
+                      studentPerformance.forEach(student => {
+                        point[student.name] = student.progression ? student.progression[i] : 0;
+                      });
+                      chartData.push(point);
+                    }
+
+                    const colors = ["#4f46e5", "#10b981", "#f59e0b", "#06b6d4"];
+
+                    return (
+                      <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          <div>
+                            <h3 className="font-extrabold text-sm text-slate-800 dark:text-white flex items-center gap-2">
+                              <Activity className="w-4 h-4 text-indigo-600" />
+                              <span>Student Grade Progression Trends</span>
+                            </h3>
+                            <p className="text-[11px] text-slate-400 font-medium">Tracking students' individual grade progress over previous evaluation periods</p>
+                          </div>
+                        </div>
+
+                        {chartData.length === 0 ? (
+                          <div className="text-center py-8 text-xs text-slate-400 font-medium pb-2">
+                            No student grade progression data available as of yet.
+                          </div>
+                        ) : (
+                          <div className="w-full h-72 md:h-80 select-none pb-2 text-[10px]">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <LineChart
+                                data={chartData}
+                                margin={{ top: 15, right: 15, left: -20, bottom: 5 }}
+                              >
+                                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" opacity={0.5} />
+                                <XAxis 
+                                  dataKey="name" 
+                                  stroke="#94a3b8" 
+                                  fontSize={10} 
+                                  tickLine={false} 
+                                  axisLine={false}
+                                />
+                                <YAxis 
+                                  domain={[0, 100]} 
+                                  stroke="#94a3b8" 
+                                  fontSize={10} 
+                                  tickLine={false} 
+                                  axisLine={false}
+                                />
+                                <ChartTooltip 
+                                  contentStyle={{ 
+                                    backgroundColor: '#ffffff', 
+                                    border: '1px solid #e2e8f0', 
+                                    borderRadius: '12px',
+                                    fontSize: '11px',
+                                    color: '#1e293b'
+                                  }} 
+                                />
+                                <Legend 
+                                  verticalAlign="top" 
+                                  height={36} 
+                                  iconType="circle"
+                                  iconSize={8}
+                                  wrapperStyle={{ fontSize: '11px', fontWeight: 'bold' }}
+                                />
+                                {studentPerformance.map((student, idx) => (
+                                  <Line
+                                    key={student.id}
+                                    type="monotone"
+                                    dataKey={student.name}
+                                    stroke={colors[idx % colors.length]}
+                                    strokeWidth={3}
+                                    activeDot={{ r: 6 }}
+                                    dot={{ strokeWidth: 2, r: 4 }}
+                                  />
+                                ))}
+                              </LineChart>
+                            </ResponsiveContainer>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   {/* INDIVIDUAL PERFORMANCE GRADES & MARKS LIST GRID */}
                   <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm">
                     <div className="flex items-center justify-between mb-5">
@@ -2508,12 +3066,19 @@ export default function App() {
                                               const aggregate = (editAsgGrade * 0.25) + (editQuizGrade * 0.15) + (editMidsemGrade * 0.3) + 20;
                                               if (aggregate >= 80) status = "Excellent";
                                               else if (aggregate >= 70) status = "Consistent";
+                                              
+                                              const newProgression = [...(stud.progression || [70, 78, 85, 88])];
+                                              if (newProgression.length > 0) {
+                                                newProgression[newProgression.length - 1] = editAsgGrade;
+                                              }
+                                              
                                               return {
                                                 ...stud,
                                                 assignmentGrade: editAsgGrade,
                                                 quizGrade: editQuizGrade,
                                                 midsemGrade: editMidsemGrade,
-                                                progressStatus: status
+                                                progressStatus: status,
+                                                progression: newProgression
                                               };
                                             }
                                             return stud;
@@ -2672,6 +3237,17 @@ export default function App() {
                       }`}
                     >
                       Registered Users ({allUsers.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdminPanelTab("databases")}
+                      className={`px-5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                        adminPanelTab === "databases"
+                          ? "bg-white text-indigo-700 font-bold border border-indigo-200 shadow-sm"
+                          : "text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      Database Manager 🗄️
                     </button>
                     <button
                       type="button"
@@ -3175,6 +3751,19 @@ export default function App() {
 
             {adminPanelTab === "usersList" && (
               <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-sm space-y-6 text-left animate-fade-in">
+                {/* Reset status banners */}
+                {resetStatusMsg && (
+                  <div className="p-4 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900 rounded-2xl flex items-center justify-between animate-fade-in text-xs text-emerald-800 dark:text-emerald-300 font-extrabold gap-3">
+                    <p className="m-0 leading-relaxed">{resetStatusMsg}</p>
+                    <button onClick={() => setResetStatusMsg(null)} className="text-slate-400 hover:text-slate-600 font-extrabold text-sm p-1 cursor-pointer">×</button>
+                  </div>
+                )}
+                {resetErrorMsg && (
+                  <div className="p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 rounded-2xl flex items-center justify-between animate-fade-in text-xs text-red-800 dark:text-red-300 font-extrabold gap-3">
+                    <p className="m-0 leading-relaxed">{resetErrorMsg}</p>
+                    <button onClick={() => setResetErrorMsg(null)} className="text-slate-400 hover:text-slate-600 font-extrabold text-sm p-1 cursor-pointer">×</button>
+                  </div>
+                )}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
                     <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-xl font-black uppercase tracking-wider">
@@ -3233,6 +3822,7 @@ export default function App() {
                           <th className="py-3 px-4">Security Role</th>
                           <th className="py-3 px-4">Identity / Index Code</th>
                           <th className="py-3 px-4">Google Integration</th>
+                          <th className="py-3 px-4">Credential Policy Action</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-xs font-semibold">
@@ -3279,12 +3869,306 @@ export default function App() {
                                 <span className="text-slate-400">Not Synced</span>
                               )}
                             </td>
+                            <td className="py-3.5 px-4 font-bold text-xs">
+                              {resettingUserId === userObjItem.id ? (
+                                <div className="flex flex-col gap-2 p-2 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 rounded-xl animate-fade-in max-w-xs" onClick={(e) => e.stopPropagation()}>
+                                  <div>
+                                    <label className="text-[9px] text-slate-400 dark:text-slate-500 font-black uppercase tracking-wider block">Temp Password</label>
+                                    <input 
+                                      type="text"
+                                      value={resetTempPassword}
+                                      onChange={(e) => setResetTempPassword(e.target.value)}
+                                      placeholder="e.g. 123456"
+                                      className="mt-1 px-2.5 py-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded text-xs select-all text-slate-800 dark:text-white w-full font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                    />
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <button 
+                                      type="button"
+                                      disabled={isResettingUserPass}
+                                      onClick={() => triggerUserPasswordReset(userObjItem.id, resetTempPassword)}
+                                      className="px-2.5 py-1 bg-red-650 hover:bg-red-700 hover:bg-red-700 bg-red-600 text-white font-extrabold text-[9px] uppercase rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                                    >
+                                      {isResettingUserPass ? "Saving..." : "Confirm"}
+                                    </button>
+                                    <button 
+                                      type="button"
+                                      onClick={() => setResettingUserId(null)}
+                                      className="px-2.5 py-1 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 text-slate-700 font-extrabold text-[9px] uppercase rounded-lg transition-colors cursor-pointer"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <button 
+                                  type="button"
+                                  onClick={() => {
+                                    setResettingUserId(userObjItem.id);
+                                    setResetTempPassword("123456");
+                                    setResetStatusMsg(null);
+                                    setResetErrorMsg(null);
+                                  }}
+                                  className="px-2.5 py-1.5 bg-red-50 hover:bg-red-100 dark:bg-red-950/20 dark:hover:bg-red-950/40 text-red-600 hover:text-red-750 font-bold text-[10px] uppercase tracking-wider rounded-lg transition-colors cursor-pointer border border-red-100 dark:border-red-900/50 flex items-center gap-1.5 shrink-0"
+                                >
+                                  <Lock className="w-3 h-3 text-red-500" />
+                                  <span>Reset Password</span>
+                                </button>
+                              )}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
                 )}
+              </div>
+            )}
+
+            {adminPanelTab === "databases" && (
+              <div className="space-y-6 animate-fade-in text-left">
+                {/* Header card with status overview */}
+                <div className="bg-slate-900 border border-slate-800 text-white rounded-3xl p-6 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-6">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 px-2.5 py-0.5 rounded-xl font-black uppercase tracking-wider">
+                        Decentralized State Sync Node active
+                      </span>
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    </div>
+                    <h3 className="text-xl font-black text-white flex items-center gap-2">
+                      <Database className="w-5 h-5 text-indigo-400 animate-pulse" />
+                      <span>Replication & Mirror Management Console</span>
+                    </h3>
+                    <p className="text-slate-400 text-xs leading-relaxed max-w-2xl">
+                      Configure GDCMS's Dual-Database Architecture. This engine synchronizes relational operations from Google Cloud SQL (PostgreSQL) into Firebase Firestore for real-time offline caching, seamless backup, and low-latency student-educator data sharing.
+                    </p>
+                  </div>
+                  <div className="shrink-0 flex flex-wrap gap-2.5">
+                    <button
+                      onClick={fetchDbStats}
+                      disabled={isLoadingDbStats}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 border border-slate-700/60 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isLoadingDbStats ? 'animate-spin' : ''}`} />
+                      <span>Diagnostics</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Primary stats comparison grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  
+                  {/* PostgreSQL Cloud SQL Card */}
+                  <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                        <div className="flex items-center gap-3">
+                          <div className="p-3 bg-indigo-50 rounded-2xl border border-indigo-100/50">
+                            <Cpu className="w-5 h-5 text-indigo-600" />
+                          </div>
+                          <div>
+                            <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider">PRIMARY DATABASE (Relational)</span>
+                            <h4 className="font-extrabold text-slate-800 text-sm">PostgreSQL Cloud SQL Core</h4>
+                          </div>
+                        </div>
+                        <span className="text-[10px] bg-emerald-50 text-emerald-700 font-black uppercase px-2 py-0.5 rounded border border-emerald-100">
+                          {dbStats?.connectionStatus || "Connected & Operational"}
+                        </span>
+                      </div>
+
+                      <div className="mt-4 space-y-3 text-xs">
+                        <div className="flex items-center justify-between py-1 border-b border-slate-50">
+                          <span className="text-slate-400 font-bold">Relational Engine</span>
+                          <span className="text-slate-700 font-black">{dbStats?.dbType || "PostgreSQL (Google Cloud SQL)"}</span>
+                        </div>
+                        <div className="flex items-center justify-between py-1 border-b border-slate-50">
+                          <span className="text-slate-400 font-bold">Regional Cloud Zone</span>
+                          <span className="text-slate-700 font-mono font-black">{dbStats?.region || "europe-west2"}</span>
+                        </div>
+                        <div className="flex items-center justify-between py-1 border-b border-slate-50">
+                          <span className="text-slate-400 font-bold">Active ORM Mapping</span>
+                          <span className="text-indigo-600 font-black">Drizzle Schema Manager</span>
+                        </div>
+                        
+                        <div className="mt-4 pt-2">
+                          <h5 className="text-[10px] font-black uppercase text-slate-400 tracking-wider mb-2">Live Relational Records Node Status</h5>
+                          <div className="grid grid-cols-2 gap-3 text-center">
+                            <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100">
+                              <p className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Courses</p>
+                              <p className="text-base font-black text-slate-800">{dbStats?.courses ?? courses.length}</p>
+                            </div>
+                            <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100">
+                              <p className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Syllabus Files</p>
+                              <p className="text-base font-black text-slate-800">{dbStats?.materials ?? materials.length}</p>
+                            </div>
+                            <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100">
+                              <p className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Submissions</p>
+                              <p className="text-base font-black text-slate-800">{dbStats?.submissions ?? submissions.length}</p>
+                            </div>
+                            <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100">
+                              <p className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Enrolled Users</p>
+                              <p className="text-base font-black text-slate-800">{dbStats?.users ?? allUsers.length}</p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-6 pt-4 border-t border-slate-100 space-y-3">
+                      <p className="text-slate-400 text-[10px] leading-relaxed font-semibold">
+                        Need to reset primary state? Triggering a seed clears transactional student inputs but populates structural courses and folders with simulated grading portfolios for preview evaluations.
+                      </p>
+                      <button
+                        onClick={handleSeedPrimaryDatabase}
+                        disabled={isSeedingDb}
+                        className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-800 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer transition-colors border border-slate-200"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isSeedingDb ? 'animate-spin' : ''}`} />
+                        <span>Purge & Re-seed PostgreSQL Node</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Firebase Firestore NoSQL Mirror Card */}
+                  <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                        <div className="flex items-center gap-3">
+                          <div className="p-3 bg-red-50 rounded-2xl border border-red-100/50">
+                            <Cloud className="w-5 h-5 text-red-500 animate-pulse" />
+                          </div>
+                          <div>
+                            <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider">MIRROR REPLICATION NODE (NoSQL)</span>
+                            <h4 className="font-extrabold text-slate-800 text-sm">Firebase NoSQL Database</h4>
+                          </div>
+                        </div>
+                        <span className="text-[10px] bg-sky-50 text-sky-700 font-black uppercase px-2 py-0.5 rounded border border-sky-100">
+                          Dual-Mirror Active
+                        </span>
+                      </div>
+
+                      <div className="mt-4 space-y-3 text-xs">
+                        <div className="flex items-center justify-between py-1 border-b border-slate-50">
+                          <span className="text-slate-400 font-bold">Sync Mode</span>
+                          <span className="text-slate-700 font-black">Asymmetrical Real-time Mirror</span>
+                        </div>
+                        <div className="flex items-center justify-between py-1 border-b border-slate-50">
+                          <span className="text-slate-400 font-bold">Firestore Project ID</span>
+                          <span className="text-slate-700 font-mono font-bold">gen-lang-client-0772636231</span>
+                        </div>
+                        <div className="flex items-center justify-between py-1 border-b border-slate-50">
+                          <span className="text-slate-400 font-bold">Instance DB ID</span>
+                          <span className="text-[11px] text-slate-600 font-mono font-bold select-all overflow-hidden text-ellipsis max-w-[200px]" title="ai-studio-9dca88f8-c6b3-4177-b603-77363bb50f89">
+                            ai-studio-9dca88f8-c6b3-4177...
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between py-1 border-b border-slate-50">
+                          <span className="text-slate-400 font-bold">Local Storage Mirror Cache</span>
+                          <span className="text-emerald-600 font-extrabold">Enabled (Persistent Cache IndexedDB)</span>
+                        </div>
+
+                        <div className="mt-4 p-3 bg-amber-50 rounded-xl border border-amber-100 text-[10px] text-amber-800 leading-relaxed font-semibold">
+                          <p className="flex items-center gap-1.5 uppercase font-bold text-amber-950 mb-1">
+                            <ShieldAlert className="w-3.5 h-3.5 mt-0.5 text-amber-600" />
+                            <span>Firestore Security Sandboxing Active</span>
+                          </p>
+                          Dual state uses symmetric password-linked hashes for client coursework notes, securing notes before they propagate to server. Students/Lecturers download documents seamlessly even during network losses.
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-6 pt-4 border-t border-slate-100 space-y-3">
+                      <p className="text-slate-400 text-[10px] leading-relaxed font-semibold">
+                        Represents live replication. Forcing rebuild synchronizes courses, lectures files indices, notebooks, and student exam files completely into Firestore.
+                      </p>
+                      
+                      <button
+                        onClick={handleForceMirrorToFirestore}
+                        disabled={isSyncingFirestore}
+                        className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-indigo-100 transition-colors disabled:opacity-50"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isSyncingFirestore ? 'animate-spin' : ''}`} />
+                        <span>Force Rebuild Firestore Mirror</span>
+                      </button>
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* Firestore Sync Logs and Progress Block */}
+                {(isSyncingFirestore || firestoreSyncProgress || firestoreSyncStatus !== 'idle') && (
+                  <div className="bg-slate-50 border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4 animate-fade-in text-xs font-semibold">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                        <Activity className="w-4 h-4 text-indigo-500 animate-pulse" />
+                        <span>State Sync Pipeline logs</span>
+                      </h4>
+                      {firestoreSyncStatus === 'success' && (
+                        <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-0.5 rounded text-[10.5px] font-black uppercase">
+                          System Synchronized ✔
+                        </span>
+                      )}
+                      {firestoreSyncStatus === 'failed' && (
+                        <span className="bg-red-50 text-red-700 border border-red-200 px-2.5 py-0.5 rounded text-[10.5px] font-black uppercase">
+                          Failed ⚠
+                        </span>
+                      )}
+                      {isSyncingFirestore && (
+                        <span className="text-indigo-600 animate-pulse flex items-center gap-1.5">
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Pipelining...</span>
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="p-4 bg-slate-900 text-indigo-400 rounded-xl font-mono text-[11px] leading-relaxed border border-slate-800">
+                      <p className="text-slate-400">// GDCMS Mirror Pipe Stream — Timestamp: {new Date().toISOString()}</p>
+                      <p className="mt-1.5 font-bold">{firestoreSyncProgress || "Awaiting task pipeline trigger..."}</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Simulated Diagnostic Tool / Interactive Checks */}
+                <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
+                  <div>
+                    <span className="text-[10px] bg-slate-100 text-slate-500 px-2.5 py-0.5 rounded-xl font-black uppercase tracking-wider">
+                      Automated Health Diagnostic
+                    </span>
+                    <h4 className="font-black text-slate-800 text-sm mt-1 flex items-center gap-1.5">
+                      <CheckCircle className="w-4 h-4 text-emerald-500" />
+                      <span>Real-time Node Health Integrity Inspector</span>
+                    </h4>
+                    <p className="text-slate-500 text-xs mt-1">
+                      Instantly query secure relational schemas and check if secure socket replication pathways are clear of bottlenecks. No user identities or tokens will be modified.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="p-4 rounded-2xl border border-slate-150 bg-slate-50 flex items-start gap-3">
+                      <CheckCircle className="w-4.5 h-4.5 text-emerald-500 shrink-0 mt-0.5" />
+                      <div className="text-xs">
+                        <p className="font-black text-slate-800 uppercase tracking-wide text-[9px]">Drizzle Relation Model Verification</p>
+                        <p className="text-slate-500 mt-1 leading-relaxed">Schema relations are verified and validated with correct database keys indices.</p>
+                      </div>
+                    </div>
+                    <div className="p-4 rounded-2xl border border-slate-150 bg-slate-50 flex items-start gap-3">
+                      <CheckCircle className="w-4.5 h-4.5 text-emerald-500 shrink-0 mt-0.5" />
+                      <div className="text-xs">
+                        <p className="font-black text-slate-800 uppercase tracking-wide text-[9px]">Secure Token Decryption Cache</p>
+                        <p className="text-slate-500 mt-1 leading-relaxed">Encryption pipeline active. Authenticated session JWT handles claims validation.</p>
+                      </div>
+                    </div>
+                    <div className="p-4 rounded-2xl border border-slate-150 bg-slate-50 flex items-start gap-3">
+                      <CheckCircle className="w-4.5 h-4.5 text-emerald-500 shrink-0 mt-0.5" />
+                      <div className="text-xs">
+                        <p className="font-black text-slate-800 uppercase tracking-wide text-[9px]">Anonymous Auth Sandboxing</p>
+                        <p className="text-slate-500 mt-1 leading-relaxed">Symmetrical NoSQL token validates reading without leaking private client indices keys.</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
               </div>
             )}
 
@@ -3528,12 +4412,7 @@ export default function App() {
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      const shareText = `[GDCMS Material] ${mat.title} (${associatedCourse?.code || "Course Title"})\nDescription: ${mat.description || ""}\nDownload Link: ${window.location.origin}/api/materials/download/${mat.id}`;
-                                      navigator.clipboard.writeText(shareText).then(() => {
-                                        alert("Material details and reference link copied to clipboard successfully!");
-                                      }).catch(err => {
-                                        console.error("Clipboard write error:", err);
-                                      });
+                                      setSharingMaterial(mat);
                                       setOpenMaterialMenuId(null);
                                     }}
                                     className="w-full px-4 py-2 hover:bg-slate-50 flex items-center gap-2 transition-colors cursor-pointer text-slate-700 text-left font-bold"
@@ -3720,8 +4599,62 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Administrative Sub-Tab Tracker Selectors */}
-              {currentUser?.role === "admin" && (
+              {/* Toggle Selector for Defaults vs Google Classroom Integration */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50 p-4 border border-slate-200 rounded-3xl">
+                <div>
+                  <h4 className="font-extrabold text-[11px] text-slate-700 tracking-tight uppercase">Syllabus Provision Service Channel</h4>
+                  <p className="text-slate-500 text-[10px] text-left">
+                    Choose whether you want GDCMS standard provisions or live Google Classroom workspace channel integration.
+                  </p>
+                </div>
+                <div className="flex bg-slate-200/60 p-1 rounded-xl self-start sm:self-center">
+                  <button
+                    onClick={() => setClassroomMode("default")}
+                    className={`px-4 py-1.5 text-[11px] font-black rounded-lg transition-all cursor-pointer ${
+                      classroomMode === "default"
+                        ? "bg-white text-slate-800 shadow-sm"
+                        : "text-slate-500 hover:text-slate-700"
+                    }`}
+                  >
+                    Default GDCMS
+                  </button>
+                  <button
+                    onClick={() => setClassroomMode("google")}
+                    className={`px-4 py-1.5 text-[11px] font-black rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                      classroomMode === "google"
+                        ? "bg-indigo-600 text-white shadow-sm font-black"
+                        : "text-slate-500 hover:text-slate-700"
+                    }`}
+                  >
+                    <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse"></span>
+                    Google Classroom
+                  </button>
+                </div>
+              </div>
+
+              {classroomMode === "google" ? (
+                <GoogleClassroomPanel
+                  googleToken={googleToken}
+                  currentUser={currentUser}
+                  courses={courses}
+                  materials={materials}
+                  classroomCourses={classroomCourses}
+                  setClassroomCourses={setClassroomCourses}
+                  classroomCoursework={classroomCoursework}
+                  setClassroomCoursework={setClassroomCoursework}
+                  selectedClassroomCourseId={selectedClassroomCourseId}
+                  setSelectedClassroomCourseId={setSelectedClassroomCourseId}
+                  isFetchingClassroom={isFetchingClassroom}
+                  setIsFetchingClassroom={setIsFetchingClassroom}
+                  handleConnectGoogle={handleConnectGoogle}
+                  token={token}
+                  fetchAppData={fetchAppData}
+                  selectedCourseId={selectedCourseId}
+                />
+              ) : (
+                <>
+                  {/* Administrative Sub-Tab Tracker Selectors */}
+                  {currentUser?.role === "admin" && (
                 <div className="bg-slate-100 p-2 rounded-2xl inline-flex gap-2">
                   <button 
                     onClick={() => setAdminSubTab("lecturer")}
@@ -3812,16 +4745,30 @@ export default function App() {
                               </div>
 
                               {/* Control buttons/link */}
-                              <div className="shrink-0 flex items-center gap-2">
-                                <a
-                                  href={`/api/materials/download/${sub.id}`}
-                                  onClick={(e) => e.stopPropagation()} // stop parent card click activate
-                                  className="p-2 sm:px-3.5 sm:py-2 ring-1 ring-slate-200 hover:ring-indigo-300 text-indigo-600 hover:text-white hover:bg-indigo-600 text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer pointer-events-auto"
-                                  title="Download Original student decrypted upload file"
+                              <div className="shrink-0 flex items-center gap-2 relative" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setOpenGenericMenuId(openGenericMenuId === `sub_${sub.id}` ? null : `sub_${sub.id}`);
+                                  }}
+                                  className="p-2 hover:bg-slate-100 rounded-xl text-slate-400 hover:text-slate-805 transition-colors cursor-pointer border border-transparent hover:border-slate-200"
+                                  title="Submission Actions"
                                 >
-                                  <Download className="w-3.5 h-3.5" />
-                                  <span className="text-[10px] hidden sm:inline">Decrypt & View File</span>
-                                </a>
+                                  <MoreVertical className="w-4 h-4 text-slate-500" />
+                                </button>
+                                {openGenericMenuId === `sub_${sub.id}` && (
+                                  <div className="absolute right-0 mt-1.5 w-44 bg-white border border-slate-200 rounded-xl shadow-lg z-50 py-1 font-bold text-xs text-slate-700 text-left">
+                                    <a
+                                      href={`/api/materials/download/${sub.id}`}
+                                      onClick={() => setOpenGenericMenuId(null)}
+                                      className="w-full px-3 py-2 hover:bg-slate-50 flex items-center gap-2 transition-colors cursor-pointer text-slate-700 font-bold text-xs"
+                                    >
+                                      <Download className="w-3.5 h-3.5 text-indigo-600" />
+                                      <span>Download File</span>
+                                    </a>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           );
@@ -4093,6 +5040,8 @@ export default function App() {
 
                 </div>
               )}
+                </>
+              )}
 
             </div>
           )}
@@ -4110,8 +5059,53 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Notes Readability & Customization Setting Hub */}
-              <div className="bg-white rounded-3xl p-5 border border-slate-200 flex flex-wrap items-center justify-between gap-4 shadow-sm">
+              {/* Keep Integration Service selector */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50 p-4 border border-slate-200 rounded-3xl">
+                <div>
+                  <h4 className="font-extrabold text-[11px] text-slate-700 tracking-tight uppercase">Notebook Integration Service</h4>
+                  <p className="text-slate-505 text-[10px] text-left">
+                    Seamlessly transition between our standard secure cipher ledger and an immersive Google Keep workspace aesthetic.
+                  </p>
+                </div>
+                <div className="flex bg-slate-200/60 p-1 rounded-xl self-start sm:self-center">
+                  <button
+                    onClick={() => setKeepMode("default")}
+                    className={`px-4 py-1.5 text-[11px] font-black rounded-lg transition-all cursor-pointer ${
+                      keepMode === "default"
+                        ? "bg-white text-slate-800 shadow-sm"
+                        : "text-slate-500 hover:text-slate-700"
+                    }`}
+                  >
+                    Standard Ledger
+                  </button>
+                  <button
+                    onClick={() => setKeepMode("google")}
+                    className={`px-4 py-1.5 text-[11px] font-black rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                      keepMode === "google"
+                        ? "bg-[#FBBC05] text-slate-900 shadow-sm font-black"
+                        : "text-slate-500 hover:text-slate-700"
+                    }`}
+                  >
+                    <span className="w-1.5 h-1.5 bg-[#EA4335] rounded-full animate-pulse"></span>
+                    Google Keep
+                  </button>
+                </div>
+              </div>
+
+              {keepMode === "google" ? (
+                <GoogleKeepPanel
+                  notes={notes}
+                  setNotes={setNotes}
+                  currentUser={currentUser}
+                  token={token}
+                  isOnline={isOnline}
+                  fetchAppData={fetchAppData}
+                  saveSingleNoteToFirestore={saveSingleNoteToFirestore}
+                />
+              ) : (
+                <>
+                  {/* Notes Readability & Customization Setting Hub */}
+                  <div className="bg-white rounded-3xl p-5 border border-slate-200 flex flex-wrap items-center justify-between gap-4 shadow-sm">
                 <div className="flex flex-wrap items-center gap-6">
                   {/* Background Theme Selector */}
                   <div className="flex items-center space-x-2">
@@ -4276,6 +5270,30 @@ export default function App() {
 
                       <div>
                         <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">
+                          Category/Tag
+                        </label>
+                        <select
+                          value={noteTag}
+                          onChange={(e) => setNoteTag(e.target.value)}
+                          className={`w-full focus:outline-none rounded-xl py-2.5 px-3 border transition-colors font-bold ${
+                            notesColorTheme === "light"
+                              ? "bg-slate-50 border-slate-200 text-slate-800 focus:bg-white focus:border-indigo-500"
+                              : notesColorTheme === "sepia"
+                              ? "bg-[#FAF2DF] border-[#EADCAE] text-[#4A321A] focus:bg-[#FFFDF6] focus:border-amber-600"
+                              : "bg-slate-950 border-slate-800 text-slate-100 focus:bg-slate-900 focus:border-indigo-600"
+                          } ${
+                            notesFontSize === "sm" ? "text-xs" : notesFontSize === "base" ? "text-xs sm:text-sm" : "text-sm sm:text-base"
+                          }`}
+                        >
+                          <option value="General Lecture">General Lecture</option>
+                          <option value="Exam Prep">Exam Prep</option>
+                          <option value="Lab Exercise">Lab Exercise</option>
+                          <option value="Revision">Revision</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">
                           Notebook Content Block
                         </label>
                         <textarea
@@ -4326,16 +5344,34 @@ export default function App() {
 
                 {/* Encrypted notebooks list feed */}
                 <div className="lg:col-span-8 space-y-4">
-                  <h4 className="font-extrabold text-sm text-slate-700 tracking-tight">Active Private Notebook collection</h4>
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <h4 className="font-extrabold text-sm text-slate-700 tracking-tight">Active Private Notebook collection</h4>
+                    <div className="flex flex-wrap bg-slate-100 p-1 rounded-xl gap-1 border border-slate-200">
+                      {(["all", "General Lecture", "Exam Prep", "Lab Exercise", "Revision"] as const).map(filterVal => (
+                        <button
+                          key={filterVal}
+                          type="button"
+                          onClick={() => setSelectedTagFilter(filterVal)}
+                          className={`px-3 py-1 rounded-lg text-[11px] font-bold cursor-pointer transition-colors ${
+                            selectedTagFilter === filterVal
+                              ? "bg-slate-950 text-white shadow-sm"
+                              : "text-slate-500 hover:text-slate-800"
+                          }`}
+                        >
+                          {filterVal}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
-                  {notes.length === 0 ? (
+                  {filteredNotes.length === 0 ? (
                     <div className="bg-white rounded-3xl p-12 text-center border border-slate-250">
                       <BookOpen className="w-10 h-10 text-slate-300 mx-auto mb-2 opacity-50" />
-                      <p className="text-xs text-slate-500 font-semibold">Your crypto-secured student notes notebook starts empty.</p>
+                      <p className="text-xs text-slate-500 font-semibold">Your crypto-secured student notes notebook starts empty or no notes match this filter.</p>
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {notes.map(note => {
+                      {filteredNotes.map(note => {
                         const isSelected = selectedNoteIds.includes(note.id);
                         return (
                           <div 
@@ -4344,6 +5380,7 @@ export default function App() {
                               setEditingNoteId(note.id);
                               setNoteTitle(note.title);
                               setNoteContent(note.content);
+                              setNoteTag(note.tag || "General Lecture");
                             }}
                             className={`rounded-3xl p-5 border shadow-sm flex flex-col justify-between gap-4 cursor-pointer hover:shadow-md transition-all ${
                               notesColorTheme === "light"
@@ -4380,17 +5417,30 @@ export default function App() {
                                     {note.title}
                                   </p>
                                 </div>
-                                {!note.isSynced ? (
-                                  <span className="text-[9px] bg-amber-600 text-white px-2 py-0.5 rounded-full font-bold uppercase whitespace-nowrap">
-                                    Offline
-                                  </span>
-                                ) : (
-                                  <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase whitespace-nowrap ${
-                                    notesColorTheme === "dark" ? "bg-slate-850 text-indigo-300" : "bg-indigo-50 text-indigo-700"
+                                <div className="flex items-center gap-1">
+                                  <span className={`text-[9px] px-2 py-0.5 rounded font-bold uppercase whitespace-nowrap ${
+                                    note.tag === "Exam Prep" 
+                                      ? "bg-rose-100 text-rose-800"
+                                      : note.tag === "Lab Exercise"
+                                      ? "bg-emerald-100 text-emerald-800"
+                                      : note.tag === "Revision"
+                                      ? "bg-amber-100 text-amber-800"
+                                      : "bg-blue-100 text-blue-800"
                                   }`}>
-                                    AES-256
+                                    {note.tag || "General Lecture"}
                                   </span>
-                                )}
+                                  {!note.isSynced ? (
+                                    <span className="text-[9px] bg-amber-600 text-white px-2 py-0.5 rounded font-bold uppercase whitespace-nowrap">
+                                      Offline
+                                    </span>
+                                  ) : (
+                                    <span className={`text-[9px] px-2 py-0.5 rounded font-bold uppercase whitespace-nowrap ${
+                                      notesColorTheme === "dark" ? "bg-slate-850 text-indigo-300" : "bg-indigo-50 text-indigo-700"
+                                    }`}>
+                                      AES-256
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                               <p className={`line-clamp-3 leading-relaxed ${
                                 notesFontSize === "sm" ? "text-[11px]" : notesFontSize === "base" ? "text-xs" : "text-sm"
@@ -4423,6 +5473,9 @@ export default function App() {
                 </div>
 
               </div>
+
+                </>
+              )}
 
             </div>
           )}

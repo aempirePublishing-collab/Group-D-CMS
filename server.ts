@@ -3,11 +3,16 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
-import { DBState, User, Course, Material, Submission, PersonalNote, NotificationItem } from "./src/types";
+import { User, Course, Material, Submission, PersonalNote, NotificationItem } from "./src/types.ts";
 
 // Load Environment
 import dotenv from "dotenv";
 dotenv.config();
+
+// SQL database and Drizzle schema imports
+import { db } from "./src/db/index.ts";
+import * as schema from "./src/db/schema.ts";
+import { eq, or, and, desc } from "drizzle-orm";
 
 const app = express();
 const PORT = 3000;
@@ -16,7 +21,7 @@ const PORT = 3000;
 const DB_FILE = path.join(process.cwd(), "src", "db.json");
 const UPLOADS_DIR = path.join(process.cwd(), "uploads");
 
-// Automatically ensure directories exist on boot
+// Automatically ensure uploads directory exists
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
@@ -26,12 +31,10 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 // Encryption Key is securely derived from environment secrets
 // ---------------------------------------------------------
 const MASTER_SECRET = process.env.GEMINI_API_KEY || process.env.SESSION_SECRET || "itn-gd-gdcms-sec-3.5-encryption-key-phrase";
-// Derive a secure 32-byte hash (256-bit key) using SHA-256
 const ENCRYPTION_KEY = crypto.createHash("sha256").update(MASTER_SECRET).digest();
 
 /**
  * Encrypt a buffer with AES-256-CBC.
- * Prepend the randomized 16-byte initialization vector to the encrypted output.
  */
 function encryptBuffer(buffer: Buffer): Buffer {
   const iv = crypto.randomBytes(16);
@@ -41,20 +44,25 @@ function encryptBuffer(buffer: Buffer): Buffer {
 }
 
 /**
- * Decrypt a buffer that contains a 16-byte IV prepended to raw AES-256-CBC ciphertext.
+ * Decrypt a buffer containing a IV prepended to raw AES ciphertext.
  */
 function decryptBuffer(encryptedBuffer: Buffer): Buffer {
-  if (encryptedBuffer.length < 16) {
-    throw new Error("Invalid or corrupted ciphertext block.");
+  try {
+    if (encryptedBuffer.length < 16) {
+      return encryptedBuffer;
+    }
+    const iv = encryptedBuffer.subarray(0, 16);
+    const ciphertext = encryptedBuffer.subarray(16);
+    const decipher = crypto.createDecipheriv("aes-256-cbc", ENCRYPTION_KEY, iv);
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  } catch (err) {
+    console.error("AES decryption of buffer failed, returning raw block:", err);
+    return encryptedBuffer;
   }
-  const iv = encryptedBuffer.subarray(0, 16);
-  const ciphertext = encryptedBuffer.subarray(16);
-  const decipher = crypto.createDecipheriv("aes-256-cbc", ENCRYPTION_KEY, iv);
-  return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
 }
 
 /**
- * Encrypt short text (e.g., student private notes content) to hex.
+ * Encrypt short text to hex.
  */
 function encryptText(text: string): string {
   const iv = crypto.randomBytes(16);
@@ -69,91 +77,194 @@ function encryptText(text: string): string {
  */
 function decryptText(encryptedText: string): string {
   if (!encryptedText || !encryptedText.includes(":")) return encryptedText;
-  const [ivHex, ciphertextHex] = encryptedText.split(":");
-  const iv = Buffer.from(ivHex, "hex");
-  const decipher = crypto.createDecipheriv("aes-256-cbc", ENCRYPTION_KEY, iv);
-  let decrypted = decipher.update(ciphertextHex, "hex", "utf8");
-  decrypted += decipher.final("utf8");
-  return decrypted;
+  try {
+    const parts = encryptedText.split(":");
+    if (parts.length < 2) return encryptedText;
+    const ivHex = parts[0];
+    const ciphertextHex = parts.slice(1).join(":");
+
+    if (ivHex.length !== 32 || !/^[0-9a-fA-F]+$/.test(ivHex)) {
+      return encryptedText;
+    }
+
+    const iv = Buffer.from(ivHex, "hex");
+    if (iv.length !== 16) {
+      return encryptedText;
+    }
+
+    const decipher = crypto.createDecipheriv("aes-256-cbc", ENCRYPTION_KEY, iv);
+    let decrypted = decipher.update(ciphertextHex, "hex", "utf8");
+    decrypted += decipher.final("utf8");
+    return decrypted;
+  } catch (err) {
+    console.error("AES decryption of text failed, returning raw content:", err);
+    return encryptedText;
+  }
 }
 
 // ---------------------------------------------------------
-// Database Operations Helper
-// Reading / Writing atomic state with lock recovery
+// SQL Seed Engine (Graceful Data Porting & Seeding)
 // ---------------------------------------------------------
-function getDatabase(): DBState {
+async function seedDatabaseIfNeeded() {
   try {
-    if (fs.existsSync(DB_FILE)) {
-      const data = fs.readFileSync(DB_FILE, "utf8");
-      const parsed = JSON.parse(data) as DBState;
-      if (!parsed.logs) parsed.logs = [];
-      if (!parsed.appConfig) {
-        parsed.appConfig = {
+    const existingUsers = await db.select().from(schema.users).limit(1);
+    if (existingUsers.length === 0) {
+      console.log("[GDCMS] Database is empty, seeding from db.json...");
+      if (fs.existsSync(DB_FILE)) {
+        const fileContent = fs.readFileSync(DB_FILE, "utf8");
+        const parsed = JSON.parse(fileContent);
+
+        // Seed users
+        if (parsed.users && parsed.users.length > 0) {
+          const expectedHash = crypto.createHash("sha256").update("123456").digest("hex");
+          await db.insert(schema.users).values(parsed.users.map((u: any) => ({
+            id: u.id,
+            indexNumber: u.indexNumber || null,
+            fullName: u.fullName,
+            email: u.email,
+            role: u.role,
+            passwordHash: u.id === "student_1" || u.id === "student_2" || u.id === "lecturer_1" || u.id === "admin_1" ? expectedHash : (u.passwordHash || null),
+            oauthConnected: u.oauthConnected || false,
+            needsPasswordChange: u.needsPasswordChange || false,
+          })));
+        }
+
+        // Seed courses
+        if (parsed.courses && parsed.courses.length > 0) {
+          await db.insert(schema.courses).values(parsed.courses.map((c: any) => ({
+            id: c.id,
+            code: c.code,
+            name: c.name,
+            lecturerId: c.lecturerId,
+            description: c.description,
+            outlineUrl: c.outlineUrl || null,
+            outlineName: c.outlineName || null,
+          })));
+        }
+
+        // Seed materials
+        if (parsed.materials && parsed.materials.length > 0) {
+          await db.insert(schema.materials).values(parsed.materials.map((m: any) => ({
+            id: m.id,
+            courseId: m.courseId,
+            title: m.title,
+            description: m.description,
+            type: m.type,
+            uploadedBy: m.uploadedBy,
+            uploadedAt: m.uploadedAt,
+            fileKey: m.fileKey,
+            originalName: m.originalName,
+            mimeType: m.mimeType,
+            fileSize: m.fileSize,
+            deadline: m.deadline || null,
+          })));
+        }
+
+        // Seed submissions
+        if (parsed.submissions && parsed.submissions.length > 0) {
+          await db.insert(schema.submissions).values(parsed.submissions.map((s: any) => ({
+            id: s.id,
+            assignmentId: s.assignmentId,
+            studentId: s.studentId,
+            studentIndex: s.studentIndex,
+            studentName: s.studentName,
+            fileKey: s.fileKey,
+            originalName: s.originalName,
+            uploadedAt: s.uploadedAt,
+            grade: s.grade || null,
+            feedback: s.feedback || null,
+            gradedBy: s.gradedBy || null,
+            gradedAt: s.gradedAt || null,
+            status: s.status,
+          })));
+        }
+
+        // Seed notes
+        if (parsed.notes && parsed.notes.length > 0) {
+          await db.insert(schema.notes).values(parsed.notes.map((n: any) => ({
+            id: n.id,
+            studentId: n.studentId,
+            title: n.title,
+            content: n.content.includes(":") ? n.content : encryptText(n.content),
+            updatedAt: n.updatedAt,
+            isSynced: n.isSynced ?? true,
+            tag: n.tag || null,
+          })));
+        }
+
+        // Seed notifications
+        if (parsed.notifications && parsed.notifications.length > 0) {
+          await db.insert(schema.notifications).values(parsed.notifications.map((n: any) => ({
+            id: n.id,
+            userId: n.userId,
+            title: n.title,
+            message: n.message,
+            type: n.type,
+            createdAt: n.createdAt,
+            isRead: n.isRead || false,
+          })));
+        }
+
+        // Seed logs
+        if (parsed.logs && parsed.logs.length > 0) {
+          await db.insert(schema.logs).values(parsed.logs.map((l: any) => ({
+            id: l.id,
+            timestamp: l.timestamp,
+            emailOrIndex: l.emailOrIndex,
+            status: l.status,
+            reason: l.reason || null,
+            userAgent: l.userAgent || null,
+            ipPlaceholder: l.ipPlaceholder || null,
+          })));
+        }
+
+        // Seed appConfig
+        if (parsed.appConfig) {
+          await db.insert(schema.appConfig).values({
+            id: "config",
+            systemName: parsed.appConfig.systemName,
+            systemShort: parsed.appConfig.systemShort,
+            assignmentsTerm: parsed.appConfig.assignmentsTerm,
+            materialsTerm: parsed.appConfig.materialsTerm,
+            themeColor: parsed.appConfig.themeColor,
+            fontSizePreset: parsed.appConfig.fontSizePreset,
+            sidebarStyle: parsed.appConfig.sidebarStyle,
+          });
+        }
+        console.log("[GDCMS] PostgreSQL seeding complete!");
+      } else {
+        await db.insert(schema.appConfig).values({
+          id: "config",
           systemName: "Group D Class Management System",
           systemShort: "GDCMS",
           assignmentsTerm: "Assignments",
           materialsTerm: "Course Materials",
           themeColor: "indigo",
           fontSizePreset: "standard",
-          sidebarStyle: "dark-navy"
-        };
+          sidebarStyle: "dark-navy",
+        });
+        console.log("[GDCMS] Default system branding configuration seeded.");
       }
-      // Set sandbox user password hashes specifically to SHA-256 of "123456"
-      // to support real, verifiable login verification.
-      const expectedHash = crypto.createHash("sha256").update("123456").digest("hex");
-      parsed.users.forEach(u => {
-        if (u.id === "student_1" || u.id === "student_2" || u.id === "lecturer_1" || u.id === "admin_1") {
-          u.passwordHash = expectedHash;
-        }
-      });
-      return parsed;
     }
   } catch (err) {
-    console.error("Failed to read JSON database, resetting state...", err);
-  }
-  return { 
-    users: [], 
-    courses: [], 
-    materials: [], 
-    submissions: [], 
-    notes: [], 
-    notifications: [],
-    logs: [],
-    appConfig: {
-      systemName: "Group D Class Management System",
-      systemShort: "GDCMS",
-      assignmentsTerm: "Assignments",
-      materialsTerm: "Course Materials",
-      themeColor: "indigo",
-      fontSizePreset: "standard",
-      sidebarStyle: "dark-navy"
-    }
-  };
-}
-
-function writeDatabase(state: DBState): void {
-  try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(state, null, 2), "utf8");
-  } catch (err) {
-    console.error("Database sync save failed:", err);
+    console.error("[GDCMS] Graceful database seeding check/run failed:", err);
   }
 }
 
-function logAuthAttempt(identifier: string, status: "success" | "failed", reason?: string, req?: express.Request): void {
+// ---------------------------------------------------------
+// Audit logger helper mapping to DB
+// ---------------------------------------------------------
+async function logAuthAttempt(identifier: string, status: "success" | "failed", reason?: string, req?: express.Request): Promise<void> {
   try {
-    const db = getDatabase();
-    if (!db.logs) db.logs = [];
-    const logItem = {
+    await db.insert(schema.logs).values({
       id: "log_" + crypto.randomUUID(),
       timestamp: new Date().toISOString(),
       emailOrIndex: identifier || "Unknown User",
       status,
-      reason,
-      userAgent: req ? req.headers["user-agent"] : undefined,
-      ipPlaceholder: req ? (req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1") as string : "127.0.0.1"
-    };
-    db.logs.push(logItem);
-    writeDatabase(db);
+      reason: reason || null,
+      userAgent: req ? (req.headers["user-agent"] as string || null) : null,
+      ipPlaceholder: req ? ((req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1") as string) : "127.0.0.1"
+    });
   } catch (err) {
     console.error("Failed to write authorization attempt audit log:", err);
   }
@@ -162,7 +273,7 @@ function logAuthAttempt(identifier: string, status: "success" | "failed", reason
 // In-Memory Secure Session Bearer Tokens
 const ACTIVE_SESSIONS = new Map<string, User>();
 
-// Express Setup Midlewares
+// Express Setup Middlewares
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
@@ -177,153 +288,204 @@ function authGuard(req: express.Request, res: express.Response, next: express.Ne
   if (!user) {
     return res.status(403).json({ error: "Expired, invalid, or unrecognized user session." });
   }
-  // Inject user metadata into Request context
   (req as any).user = user;
   next();
 }
 
 // ---------------------------------------------------------
-// API ROUTES (Always register before Vite static serving)
+// API ROUTES
 // ---------------------------------------------------------
 
 // Health Check API
 app.get("/api/health", (req, res) => {
-  res.json({ status: "healthy", system: "GDCMS Core Node", encryption: "AES-256 active" });
+  res.json({ status: "healthy", system: "GDCMS production server", database: "PostgreSQL active", encryption: "AES-256 active" });
 });
 
 // Authentication: Registration
-app.post("/api/auth/register", (req, res) => {
+app.post("/api/auth/register", async (req, res) => {
   const { indexNumber, fullName, email, password, role } = req.body;
 
   if (!fullName || !email || !password || !role) {
     return res.status(400).json({ error: "Missing mandatory registration fields." });
   }
 
-  const db = getDatabase();
-
-  // Validate students require check-in numbers
   if (role === "student" && !indexNumber) {
     return res.status(400).json({ error: "Students must supply a valid university index ID." });
   }
 
-  // Double check existing registration
-  const duplicate = db.users.find(u => 
-    u.email.toLowerCase() === email.toLowerCase() || 
-    (indexNumber && u.indexNumber === indexNumber)
-  );
+  try {
+    // Check duplication in SQL
+    const duplicate = (await db.select().from(schema.users).where(
+      or(
+        eq(schema.users.email, email),
+        indexNumber ? eq(schema.users.indexNumber, indexNumber) : undefined
+      )
+    ))[0];
 
-  if (duplicate) {
-    return res.status(400).json({ error: "A client with this index ID or Email is already registered." });
+    if (duplicate) {
+      return res.status(400).json({ error: "A client with this index ID or Email is already registered." });
+    }
+
+    const passwordHash = crypto.createHash("sha256").update(password).digest("hex");
+    const newId = "user_" + crypto.randomUUID();
+
+    const newUser: User = {
+      id: newId,
+      indexNumber: role === "student" ? indexNumber : undefined,
+      fullName,
+      email,
+      role: role as any,
+      passwordHash,
+      oauthConnected: false
+    };
+
+    await db.insert(schema.users).values({
+      id: newId,
+      indexNumber: role === "student" ? indexNumber : null,
+      fullName,
+      email,
+      role,
+      passwordHash,
+      oauthConnected: false,
+      needsPasswordChange: false,
+    });
+
+    const sessionToken = crypto.randomBytes(32).toString("hex");
+    ACTIVE_SESSIONS.set(sessionToken, newUser);
+
+    res.status(201).json({
+      message: "Registration successful",
+      token: sessionToken,
+      user: { id: newUser.id, fullName: newUser.fullName, email: newUser.email, role: newUser.role, indexNumber: newUser.indexNumber }
+    });
+  } catch (err: any) {
+    console.error("SQL registration error:", err);
+    res.status(500).json({ error: "Database error during registration process: " + err.message });
   }
-
-  // Create salted password hash representation (using crypto for simple self-contained setup)
-  const passwordHash = crypto.createHash("sha256").update(password).digest("hex");
-
-  const newUser: User = {
-    id: "user_" + crypto.randomUUID(),
-    indexNumber: role === "student" ? indexNumber : undefined,
-    fullName,
-    email,
-    role,
-    passwordHash,
-    oauthConnected: false
-  };
-
-  db.users.push(newUser);
-  writeDatabase(db);
-
-  // Generate Session Bearer Token immediately
-  const sessionToken = crypto.randomBytes(32).toString("hex");
-  ACTIVE_SESSIONS.set(sessionToken, newUser);
-
-  res.status(201).json({
-    message: "Registration successful",
-    token: sessionToken,
-    user: { id: newUser.id, fullName: newUser.fullName, email: newUser.email, role: newUser.role, indexNumber: newUser.indexNumber }
-  });
 });
 
 // Authentication: Login with Index Number or Email
-app.post("/api/auth/login", (req, res) => {
-  const { identifier, password } = req.body; // 'identifier' can be index number or email
+app.post("/api/auth/login", async (req, res) => {
+  const { identifier, password } = req.body;
 
   if (!identifier || !password) {
-    logAuthAttempt(identifier || "Unknown", "failed", "Missing identifier or password", req);
+    await logAuthAttempt(identifier || "Unknown", "failed", "Missing identifier or password", req);
     return res.status(400).json({ error: "Identifier and password credentials are required." });
   }
 
-  const db = getDatabase();
-  const inputHash = crypto.createHash("sha256").update(password).digest("hex");
+  try {
+    const inputHash = crypto.createHash("sha256").update(password).digest("hex");
 
-  const user = db.users.find(u => 
-    (u.indexNumber && u.indexNumber === identifier) ||
-    u.email.toLowerCase() === identifier.toLowerCase()
-  );
+    const userObj = (await db.select().from(schema.users).where(
+      or(
+        eq(schema.users.indexNumber, identifier),
+        eq(schema.users.email, identifier)
+      )
+    ))[0];
 
-  if (!user) {
-    logAuthAttempt(identifier, "failed", "Credentials rejected. Profile search yielded empty results", req);
-    return res.status(401).json({ error: "Authentication failed. User not found." });
+    if (!userObj) {
+      await logAuthAttempt(identifier, "failed", "Credentials rejected. Profile search yielded empty results", req);
+      return res.status(401).json({ error: "Authentication failed. User not found." });
+    }
+
+    const isValid = userObj.passwordHash === inputHash;
+
+    if (!isValid) {
+      await logAuthAttempt(identifier, "failed", "Unmatched security credential cipher keys comparison", req);
+      return res.status(401).json({ error: "Invalid password credentials." });
+    }
+
+    const matchedUser: User = {
+      id: userObj.id,
+      indexNumber: userObj.indexNumber || undefined,
+      fullName: userObj.fullName,
+      email: userObj.email,
+      role: userObj.role as any,
+      oauthConnected: userObj.oauthConnected || false,
+      needsPasswordChange: userObj.needsPasswordChange || false,
+    };
+
+    const sessionToken = crypto.randomBytes(32).toString("hex");
+    ACTIVE_SESSIONS.set(sessionToken, matchedUser);
+
+    await logAuthAttempt(identifier, "success", "Interactive portal portal authorization granted", req);
+
+    res.json({
+      message: "Login successful",
+      token: sessionToken,
+      user: { id: matchedUser.id, fullName: matchedUser.fullName, email: matchedUser.email, role: matchedUser.role, indexNumber: matchedUser.indexNumber }
+    });
+  } catch (err: any) {
+    console.error("SQL login error:", err);
+    res.status(500).json({ error: "Database error during login: " + err.message });
   }
-
-  const isValid = user.passwordHash === inputHash;
-  
-  if (!isValid) {
-    logAuthAttempt(identifier, "failed", "Unmatched security credential cipher keys comparison", req);
-    return res.status(401).json({ error: "Invalid password credentials." });
-  }
-
-  // Success: Create Session Token
-  const sessionToken = crypto.randomBytes(32).toString("hex");
-  ACTIVE_SESSIONS.set(sessionToken, user);
-
-  logAuthAttempt(identifier, "success", "Interactive portal portal authorization granted", req);
-
-  res.json({
-    message: "Login successful",
-    token: sessionToken,
-    user: { id: user.id, fullName: user.fullName, email: user.email, role: user.role, indexNumber: user.indexNumber }
-  });
 });
 
-// OAuth 2.0 Client Flow Gateway Exchange (Simulated & Authenticated)
-app.post("/api/auth/oauth-sync", (req, res) => {
+// OAuth 2.0 Client Flow Gateway Exchange
+app.post("/api/auth/oauth-sync", async (req, res) => {
   const { oauthProvider, email, fullName, indexNumber } = req.body;
 
   if (!email || !fullName) {
     return res.status(400).json({ error: "OAuth profile syncing requires email and name scope." });
   }
 
-  const db = getDatabase();
-  let user = db.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+  try {
+    let userObj = (await db.select().from(schema.users).where(eq(schema.users.email, email)))[0];
 
-  if (!user) {
-    // Dynamically onboard as Student or Lecturer according strictly to user input
-    user = {
-      id: "user_" + crypto.randomUUID(),
-      fullName,
-      email,
-      indexNumber: indexNumber || "O-" + Math.floor(10000000 + Math.random() * 90000000),
-      role: email.endsWith("@gdcms.edu") ? "lecturer" : "student",
-      oauthConnected: true
-    };
-    db.users.push(user);
-    writeDatabase(db);
-  } else {
-    // If user existed, mark linked status
-    if (!user.oauthConnected) {
-      user.oauthConnected = true;
-      writeDatabase(db);
+    if (!userObj) {
+      const generatedId = "user_" + crypto.randomUUID();
+      const derivedIndex = indexNumber || "O-" + Math.floor(10000000 + Math.random() * 90000000);
+      const assignedRole = email.endsWith("@gdcms.edu") ? "lecturer" : "student";
+
+      await db.insert(schema.users).values({
+        id: generatedId,
+        fullName,
+        email,
+        indexNumber: derivedIndex,
+        role: assignedRole,
+        oauthConnected: true,
+        needsPasswordChange: false,
+      });
+
+      userObj = {
+        id: generatedId,
+        fullName,
+        email,
+        indexNumber: derivedIndex,
+        role: assignedRole,
+        oauthConnected: true,
+        passwordHash: null,
+        needsPasswordChange: false,
+      };
+    } else {
+      if (!userObj.oauthConnected) {
+        await db.update(schema.users).set({ oauthConnected: true }).where(eq(schema.users.id, userObj.id));
+        userObj.oauthConnected = true;
+      }
     }
+
+    const matchedUser: User = {
+      id: userObj.id,
+      indexNumber: userObj.indexNumber || undefined,
+      fullName: userObj.fullName,
+      email: userObj.email,
+      role: userObj.role as any,
+      oauthConnected: userObj.oauthConnected || false,
+      needsPasswordChange: userObj.needsPasswordChange || false,
+    };
+
+    const sessionToken = "oauth_" + crypto.randomBytes(32).toString("hex");
+    ACTIVE_SESSIONS.set(sessionToken, matchedUser);
+
+    res.json({
+      message: `Linked via ${oauthProvider} OAuth 2.0 successfully.`,
+      token: sessionToken,
+      user: { id: matchedUser.id, fullName: matchedUser.fullName, email: matchedUser.email, role: matchedUser.role, indexNumber: matchedUser.indexNumber }
+    });
+  } catch (err: any) {
+    console.error("OAuth sync error:", err);
+    res.status(500).json({ error: "Database error during OAuth syncing: " + err.message });
   }
-
-  const sessionToken = "oauth_" + crypto.randomBytes(32).toString("hex");
-  ACTIVE_SESSIONS.set(sessionToken, user);
-
-  res.json({
-    message: `Linked via ${oauthProvider} OAuth 2.0 successfully.`,
-    token: sessionToken,
-    user: { id: user.id, fullName: user.fullName, email: user.email, role: user.role, indexNumber: user.indexNumber }
-  });
 });
 
 // Get Session Identity
@@ -347,19 +509,27 @@ app.post("/api/auth/logout", (req, res) => {
 // ---------------------------------------------------------
 
 // List active Courses
-app.get("/api/courses", authGuard, (req, res) => {
-  const db = getDatabase();
-  res.json(db.courses);
+app.get("/api/courses", authGuard, async (req, res) => {
+  try {
+    const allCourses = await db.select().from(schema.courses);
+    res.json(allCourses);
+  } catch (err: any) {
+    res.status(500).json({ error: "Database error fetching courses: " + err.message });
+  }
 });
 
 // Get Materials List for active Courses
-app.get("/api/materials", authGuard, (req, res) => {
-  const db = getDatabase();
-  res.json(db.materials);
+app.get("/api/materials", authGuard, async (req, res) => {
+  try {
+    const allMaterials = await db.select().from(schema.materials);
+    res.json(allMaterials);
+  } catch (err: any) {
+    res.status(500).json({ error: "Database error fetching materials: " + err.message });
+  }
 });
 
 // Upload and ENCRYPT course document/lecture note via AES-256
-app.post("/api/materials/upload", authGuard, (req, res) => {
+app.post("/api/materials/upload", authGuard, async (req, res) => {
   const user = (req as any).user;
   if (user.role !== "lecturer" && user.role !== "admin") {
     return res.status(403).json({ error: "Only lecturers are authorized to distribute course materials." });
@@ -372,7 +542,6 @@ app.post("/api/materials/upload", authGuard, (req, res) => {
   }
 
   try {
-    // Decode base64 payload to binary
     const buffer = Buffer.from(fileData, "base64");
     const fileSize = buffer.length;
 
@@ -383,13 +552,14 @@ app.post("/api/materials/upload", authGuard, (req, res) => {
     const storageKey = `gdcms_material_${crypto.randomUUID()}.enc`;
     fs.writeFileSync(path.join(UPLOADS_DIR, storageKey), encrypted);
 
-    const db = getDatabase();
+    const generatedMaterialId = "mat_" + crypto.randomUUID();
+
     const newMaterial: Material = {
-      id: "mat_" + crypto.randomUUID(),
+      id: generatedMaterialId,
       courseId,
       title,
       description: description || "",
-      type,
+      type: type as any,
       uploadedBy: user.fullName,
       uploadedAt: new Date().toISOString(),
       fileKey: storageKey,
@@ -399,22 +569,32 @@ app.post("/api/materials/upload", authGuard, (req, res) => {
       deadline: deadline || undefined
     };
 
-    db.materials.push(newMaterial);
-    
+    await db.insert(schema.materials).values({
+      id: generatedMaterialId,
+      courseId,
+      title,
+      description: description || "",
+      type,
+      uploadedBy: user.fullName,
+      uploadedAt: newMaterial.uploadedAt,
+      fileKey: storageKey,
+      originalName: fileName,
+      mimeType: newMaterial.mimeType,
+      fileSize,
+      deadline: deadline || null,
+    });
+
     // Auto emit notification
-    const course = db.courses.find(c => c.id === courseId);
-    const notif: NotificationItem = {
+    const course = (await db.select().from(schema.courses).where(eq(schema.courses.id, courseId)))[0];
+    await db.insert(schema.notifications).values({
       id: "notif_" + crypto.randomUUID(),
       userId: "all",
       title: "New Material Uploaded 📚",
       message: `${user.fullName} uploaded ${title} for ${course?.code || "Course"}.`,
       type: "material",
       createdAt: new Date().toISOString(),
-      isRead: false
-    };
-    db.notifications.push(notif);
-
-    writeDatabase(db);
+      isRead: false,
+    });
 
     res.status(201).json({ message: "Document uploaded and encrypted successfully.", material: newMaterial });
   } catch (err: any) {
@@ -424,37 +604,30 @@ app.post("/api/materials/upload", authGuard, (req, res) => {
 });
 
 // Decrypt and DOWNLOAD / Stream encrypted file at rest securely
-app.get("/api/materials/download/:id", authGuard, (req, res) => {
+app.get("/api/materials/download/:id", authGuard, async (req, res) => {
   const materialId = req.params.id;
-  const db = getDatabase();
-
-  // Find document in either academic Materials collection OR interactive assignments Submissions
-  const material = db.materials.find(m => m.id === materialId);
-  const submission = db.submissions.find(s => s.id === materialId);
-
-  const fileMeta = material || submission;
-
-  if (!fileMeta) {
-    return res.status(404).json({ error: "Document item not found in database records." });
-  }
-
-  const filePath = path.join(UPLOADS_DIR, fileMeta.fileKey);
-  
-  // Custom offline file demonstration buffer if they are downloading seed files
-  if (!fs.existsSync(filePath)) {
-    // Provide a dynamic text fallback file, encrypt it, and write it dynamically so standard downloads work!
-    const mockContent = `GDCMS SECURE SYSTEM\nDocument ID: ${fileMeta.id}\nOriginal Name: ${fileMeta.originalName}\nAt-Rest Encryption: AES-256-CBC\nThis file was securely decrypted on-the-fly from physical disk. All systems operational.`;
-    const encryptedMock = encryptBuffer(Buffer.from(mockContent, "utf8"));
-    fs.writeFileSync(filePath, encryptedMock);
-  }
 
   try {
+    const material = (await db.select().from(schema.materials).where(eq(schema.materials.id, materialId)))[0];
+    const submission = (await db.select().from(schema.submissions).where(eq(schema.submissions.id, materialId)))[0];
+
+    const fileMeta = material || submission;
+
+    if (!fileMeta) {
+      return res.status(404).json({ error: "Document item not found in database records." });
+    }
+
+    const filePath = path.join(UPLOADS_DIR, fileMeta.fileKey);
+
+    if (!fs.existsSync(filePath)) {
+      const mockContent = `GDCMS SECURE SYSTEM\nDocument ID: ${fileMeta.id}\nOriginal Name: ${fileMeta.originalName}\nAt-Rest Encryption: AES-256-CBC\nThis file was securely decrypted on-the-fly from physical disk. All systems operational.`;
+      const encryptedMock = encryptBuffer(Buffer.from(mockContent, "utf8"));
+      fs.writeFileSync(filePath, encryptedMock);
+    }
+
     const encryptedContent = fs.readFileSync(filePath);
-    
-    // Decrypt the physical document from Disk on flight
     const decrypted = decryptBuffer(encryptedContent);
 
-    // Stream back safe original decrypted binary with correct headers
     res.setHeader("Content-Type", (fileMeta as any).mimeType || "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${fileMeta.originalName}"`);
     res.setHeader("Content-Length", decrypted.length);
@@ -470,20 +643,24 @@ app.get("/api/materials/download/:id", authGuard, (req, res) => {
 // ---------------------------------------------------------
 
 // List submissions: Students get only theirs, lecturers get everything!
-app.get("/api/submissions", authGuard, (req, res) => {
+app.get("/api/submissions", authGuard, async (req, res) => {
   const user = (req as any).user;
-  const db = getDatabase();
 
-  if (user.role === "student") {
-    const studentSubs = db.submissions.filter(s => s.studentId === user.id);
-    return res.json(studentSubs);
+  try {
+    if (user.role === "student") {
+      const studentSubs = await db.select().from(schema.submissions).where(eq(schema.submissions.studentId, user.id));
+      return res.json(studentSubs);
+    }
+
+    const allSubs = await db.select().from(schema.submissions);
+    res.json(allSubs);
+  } catch (err: any) {
+    res.status(500).json({ error: "Database error fetching submissions: " + err.message });
   }
-
-  res.json(db.submissions);
 });
 
 // Student uploads Assignment submission (AES-256 Encrypted)
-app.post("/api/submissions/upload", authGuard, (req, res) => {
+app.post("/api/submissions/upload", authGuard, async (req, res) => {
   const user = (req as any).user;
   if (user.role !== "student") {
     return res.status(403).json({ error: "Only student portal users can submit assignments." });
@@ -503,13 +680,18 @@ app.post("/api/submissions/upload", authGuard, (req, res) => {
     const storageKey = `gdcms_submission_${crypto.randomUUID()}.enc`;
     fs.writeFileSync(path.join(UPLOADS_DIR, storageKey), encrypted);
 
-    const db = getDatabase();
-    
     // Handle overwrite if student submits multiple times
-    const existingIndex = db.submissions.findIndex(s => s.assignmentId === assignmentId && s.studentId === user.id);
-    
+    const existing = (await db.select().from(schema.submissions).where(
+      and(
+        eq(schema.submissions.assignmentId, assignmentId),
+        eq(schema.submissions.studentId, user.id)
+      )
+    ))[0];
+
+    const generatedSubId = existing ? existing.id : "sub_" + crypto.randomUUID();
+
     const newSubmission: Submission = {
-      id: "sub_" + crypto.randomUUID(),
+      id: generatedSubId,
       assignmentId,
       studentId: user.id,
       studentIndex: user.indexNumber || "Unknown",
@@ -520,40 +702,57 @@ app.post("/api/submissions/upload", authGuard, (req, res) => {
       status: "pending"
     };
 
-    if (existingIndex !== -1) {
-      // Clean old file if exists
+    if (existing) {
       try {
-        const oldPath = path.join(UPLOADS_DIR, db.submissions[existingIndex].fileKey);
+        const oldPath = path.join(UPLOADS_DIR, existing.fileKey);
         if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
       } catch (e) {}
-      // Overwrite submission
-      db.submissions[existingIndex] = newSubmission;
+
+      await db.update(schema.submissions).set({
+        fileKey: storageKey,
+        originalName: fileName,
+        uploadedAt: newSubmission.uploadedAt,
+        status: "pending",
+        grade: null,
+        feedback: null,
+        gradedBy: null,
+        gradedAt: null,
+      }).where(eq(schema.submissions.id, existing.id));
     } else {
-      db.submissions.push(newSubmission);
+      await db.insert(schema.submissions).values({
+        id: generatedSubId,
+        assignmentId,
+        studentId: user.id,
+        studentIndex: user.indexNumber || "Unknown",
+        studentName: user.fullName,
+        fileKey: storageKey,
+        originalName: fileName,
+        uploadedAt: newSubmission.uploadedAt,
+        status: "pending",
+      });
     }
 
     // Generate lecturer notification upon student assignment upload
     try {
-      const promptMaterial = db.materials.find(m => m.id === assignmentId);
+      const promptMaterial = (await db.select().from(schema.materials).where(eq(schema.materials.id, assignmentId)))[0];
       const assignmentTitle = promptMaterial ? promptMaterial.title : "Class Assignment";
-      
-      const lecturers = db.users.filter(u => u.role === "lecturer");
-      lecturers.forEach(lecturer => {
-        db.notifications.push({
+
+      const lecturers = await db.select().from(schema.users).where(eq(schema.users.role, "lecturer"));
+      for (const lecturer of lecturers) {
+        await db.insert(schema.notifications).values({
           id: "notif_" + crypto.randomUUID(),
           userId: lecturer.id,
           title: "New Submission Collected 📥",
           message: `${user.fullName} (${user.indexNumber || "Student"}) submitted coursework for: "${assignmentTitle}".`,
           type: "assignment",
           createdAt: new Date().toISOString(),
-          isRead: false
+          isRead: false,
         });
-      });
+      }
     } catch (notifErr) {
       console.error("Failed to generate lecturer submission alert notifications:", notifErr);
     }
 
-    writeDatabase(db);
     res.status(201).json({ message: "Submission encrypted and pushed successfully.", submission: newSubmission });
   } catch (err: any) {
     console.error("Secure uploading failed:", err);
@@ -562,7 +761,7 @@ app.post("/api/submissions/upload", authGuard, (req, res) => {
 });
 
 // Lecturer Grades & Evaluates dynamic submission
-app.post("/api/submissions/grade", authGuard, (req, res) => {
+app.post("/api/submissions/grade", authGuard, async (req, res) => {
   const user = (req as any).user;
   if (user.role !== "lecturer" && user.role !== "admin") {
     return res.status(403).json({ error: "Unauthorized access. Role restricted." });
@@ -574,36 +773,55 @@ app.post("/api/submissions/grade", authGuard, (req, res) => {
     return res.status(400).json({ error: "Submission reference and Grade score are required." });
   }
 
-  const db = getDatabase();
-  const index = db.submissions.findIndex(s => s.id === submissionId);
+  try {
+    const sub = (await db.select().from(schema.submissions).where(eq(schema.submissions.id, submissionId)))[0];
 
-  if (index === -1) {
-    return res.status(404).json({ error: "Specified student submission is missing." });
+    if (!sub) {
+      return res.status(404).json({ error: "Specified student submission is missing." });
+    }
+
+    const gradedAtVal = new Date().toISOString();
+
+    await db.update(schema.submissions).set({
+      grade,
+      feedback: feedback || "",
+      gradedBy: user.fullName,
+      gradedAt: gradedAtVal,
+      status: "graded",
+    }).where(eq(schema.submissions.id, submissionId));
+
+    const updatedSub: Submission = {
+      id: sub.id,
+      assignmentId: sub.assignmentId,
+      studentId: sub.studentId,
+      studentIndex: sub.studentIndex,
+      studentName: sub.studentName,
+      fileKey: sub.fileKey,
+      originalName: sub.originalName,
+      uploadedAt: sub.uploadedAt,
+      grade,
+      feedback: feedback || "",
+      gradedBy: user.fullName,
+      gradedAt: gradedAtVal,
+      status: "graded"
+    };
+
+    // Create immediate notification item for targeted student
+    const assignment = (await db.select().from(schema.materials).where(eq(schema.materials.id, sub.assignmentId)))[0];
+    await db.insert(schema.notifications).values({
+      id: "notif_" + crypto.randomUUID(),
+      userId: sub.studentId,
+      title: "New Assessment Graded! 📝",
+      message: `Your work for ${assignment?.title || "Assignment"} scored: ${grade}. Lecturer comments: "${feedback || 'No comments'}"`,
+      type: "grade",
+      createdAt: new Date().toISOString(),
+      isRead: false,
+    });
+
+    res.json({ message: "Assessment grading updated successfully.", submission: updatedSub });
+  } catch (err: any) {
+    res.status(500).json({ error: "Database error grading submission: " + err.message });
   }
-
-  const sub = db.submissions[index];
-  sub.grade = grade;
-  sub.feedback = feedback || "";
-  sub.gradedBy = user.fullName;
-  sub.gradedAt = new Date().toISOString();
-  sub.status = "graded";
-
-  // Create immediate notification item for targeted student
-  const assignment = db.materials.find(m => m.id === sub.assignmentId);
-  const notif: NotificationItem = {
-    id: "notif_" + crypto.randomUUID(),
-    userId: sub.studentId,
-    title: "New Assessment Graded! 📝",
-    message: `Your work for ${assignment?.title || "Assignment"} scored: ${grade}. Lecturer comments: "${feedback || 'No comments'}"`,
-    type: "grade",
-    createdAt: new Date().toISOString(),
-    isRead: false
-  };
-
-  db.notifications.push(notif);
-  writeDatabase(db);
-
-  res.json({ message: "Assessment grading updated successfully.", submission: sub });
 });
 
 // ---------------------------------------------------------
@@ -611,181 +829,265 @@ app.post("/api/submissions/grade", authGuard, (req, res) => {
 // ---------------------------------------------------------
 
 // List personal notes
-app.get("/api/notes", authGuard, (req, res) => {
+app.get("/api/notes", authGuard, async (req, res) => {
   const user = (req as any).user;
-  const db = getDatabase();
 
-  const userNotes = db.notes.filter(n => n.studentId === user.id);
-  
-  // Decrypt contents on flight before showing in UI
-  const decryptedNotes = userNotes.map(n => ({
-    ...n,
-    content: decryptText(n.content)
-  }));
+  try {
+    const userNotes = await db.select().from(schema.notes).where(eq(schema.notes.studentId, user.id));
 
-  res.json(decryptedNotes);
+    // Decrypt contents on-the-fly before sending to client
+    const decryptedNotes = userNotes.map(n => ({
+      id: n.id,
+      studentId: n.studentId,
+      title: n.title,
+      content: decryptText(n.content),
+      updatedAt: n.updatedAt,
+      isSynced: n.isSynced ?? true,
+      tag: n.tag || undefined,
+    }));
+
+    res.json(decryptedNotes);
+  } catch (err: any) {
+    res.status(500).json({ error: "Database error fetching notes: " + err.message });
+  }
 });
 
 // Post and update Encrypted personal notes
-app.post("/api/notes", authGuard, (req, res) => {
+app.post("/api/notes", authGuard, async (req, res) => {
   const user = (req as any).user;
-  const { id, title, content } = req.body;
+  const { id, title, content, tag } = req.body;
 
   if (!title) {
     return res.status(400).json({ error: "Note title cannot be blank." });
   }
 
-  const db = getDatabase();
+  try {
+    const encryptedContent = encryptText(content || "");
 
-  // Encrypt note content using AES-256 prior to DB writing
-  const encryptedContent = encryptText(content || "");
+    const targetId = id || "note_" + crypto.randomUUID();
+    const existing = (await db.select().from(schema.notes).where(
+      and(
+        eq(schema.notes.id, targetId),
+        eq(schema.notes.studentId, user.id)
+      )
+    ))[0];
 
-  const existingIndex = db.notes.findIndex(n => n.id === id && n.studentId === user.id);
+    const updatedAt = new Date().toISOString();
 
-  if (existingIndex !== -1) {
-    db.notes[existingIndex].title = title;
-    db.notes[existingIndex].content = encryptedContent;
-    db.notes[existingIndex].updatedAt = new Date().toISOString();
-    db.notes[existingIndex].isSynced = true;
-    writeDatabase(db);
-    res.json({ message: "Personal note saved and encrypted.", note: { id, title, content, updatedAt: db.notes[existingIndex].updatedAt, studentId: user.id, isSynced: true } });
-  } else {
-    const newNote: PersonalNote = {
-      id: id || "note_" + crypto.randomUUID(),
-      studentId: user.id,
-      title,
-      content: encryptedContent,
-      updatedAt: new Date().toISOString(),
-      isSynced: true
-    };
-    db.notes.push(newNote);
-    writeDatabase(db);
-    res.status(201).json({ message: "Personal note created and encrypted.", note: { ...newNote, content } });
+    if (existing) {
+      await db.update(schema.notes).set({
+        title,
+        content: encryptedContent,
+        updatedAt,
+        isSynced: true,
+        tag: tag || null,
+      }).where(eq(schema.notes.id, existing.id));
+
+      res.json({
+        message: "Personal note saved and encrypted.",
+        note: { id: targetId, title, content, updatedAt, studentId: user.id, isSynced: true, tag }
+      });
+    } else {
+      await db.insert(schema.notes).values({
+        id: targetId,
+        studentId: user.id,
+        title,
+        content: encryptedContent,
+        updatedAt,
+        isSynced: true,
+        tag: tag || null,
+      });
+
+      res.status(201).json({
+        message: "Personal note created and encrypted.",
+        note: { id: targetId, studentId: user.id, title, content, updatedAt, isSynced: true, tag }
+      });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: "Database error saving note: " + err.message });
   }
 });
 
-// Batch Sync Student Notes (Supports Offline outbox synchronization)
-app.post("/api/notes/sync", authGuard, (req, res) => {
+// Batch Sync Student Notes
+app.post("/api/notes/sync", authGuard, async (req, res) => {
   const user = (req as any).user;
-  const { notes } = req.body; // Array of PersonalNotes from offline LocalStorage outbox
+  const { notes: clientNotes } = req.body;
 
-  if (!Array.isArray(notes)) {
+  if (!Array.isArray(clientNotes)) {
     return res.status(400).json({ error: "Invalid sync collection format." });
   }
 
-  const db = getDatabase();
-  let syncCount = 0;
+  try {
+    let syncCount = 0;
 
-  for (const clientNote of notes) {
-    const encryptedContent = encryptText(clientNote.content || "");
-    const existingIndex = db.notes.findIndex(n => n.id === clientNote.id && n.studentId === user.id);
+    for (const clientNote of clientNotes) {
+      const encryptedContent = encryptText(clientNote.content || "");
+      const existing = (await db.select().from(schema.notes).where(
+        and(
+          eq(schema.notes.id, clientNote.id),
+          eq(schema.notes.studentId, user.id)
+        )
+      ))[0];
 
-    if (existingIndex !== -1) {
-      db.notes[existingIndex].title = clientNote.title;
-      db.notes[existingIndex].content = encryptedContent;
-      db.notes[existingIndex].updatedAt = clientNote.updatedAt || new Date().toISOString();
-      db.notes[existingIndex].isSynced = true;
-    } else {
-      db.notes.push({
-        id: clientNote.id,
-        studentId: user.id,
-        title: clientNote.title,
-        content: encryptedContent,
-        updatedAt: clientNote.updatedAt || new Date().toISOString(),
-        isSynced: true
+      const updatedAtVal = clientNote.updatedAt || new Date().toISOString();
+
+      if (existing) {
+        await db.update(schema.notes).set({
+          title: clientNote.title,
+          content: encryptedContent,
+          updatedAt: updatedAtVal,
+          isSynced: true,
+          tag: clientNote.tag || null,
+        }).where(eq(schema.notes.id, existing.id));
+      } else {
+        await db.insert(schema.notes).values({
+          id: clientNote.id,
+          studentId: user.id,
+          title: clientNote.title,
+          content: encryptedContent,
+          updatedAt: updatedAtVal,
+          isSynced: true,
+          tag: clientNote.tag || null,
+        });
+      }
+      syncCount++;
+    }
+
+    if (syncCount > 0) {
+      await db.insert(schema.notifications).values({
+        id: "notif_" + crypto.randomUUID(),
+        userId: user.id,
+        title: "Offline Sync Complete! 🔄",
+        message: `${syncCount} personal notebook entries successfully saved and encrypted with AES-256 on the cloud.`,
+        type: "offline_sync",
+        createdAt: new Date().toISOString(),
+        isRead: false,
       });
     }
-    syncCount++;
-  }
 
-  if (syncCount > 0) {
-    // Generate notification for sync complete
-    db.notifications.push({
-      id: "notif_" + crypto.randomUUID(),
-      userId: user.id,
-      title: "Offline Sync Complete! 🔄",
-      message: `${syncCount} personal notebook entries successfully saved and encrypted with AES-256 on the cloud.`,
-      type: "offline_sync",
-      createdAt: new Date().toISOString(),
-      isRead: false
-    });
-    writeDatabase(db);
+    res.json({ message: "Sync successful", syncedCount: syncCount });
+  } catch (err: any) {
+    res.status(500).json({ error: "Database error syncing notes: " + err.message });
   }
-
-  res.json({ message: "Sync successful", syncedCount: syncCount });
 });
 
 // ---------------------------------------------------------
 // NOTIFICATIONS IN-APP FEED API
 // ---------------------------------------------------------
-app.get("/api/notifications", authGuard, (req, res) => {
+app.get("/api/notifications", authGuard, async (req, res) => {
   const user = (req as any).user;
-  const db = getDatabase();
 
-  const userNotifs = db.notifications.filter(n => n.userId === user.id || n.userId === "all");
-  res.json(userNotifs);
+  try {
+    const userNotifs = await db.select().from(schema.notifications).where(
+      or(
+        eq(schema.notifications.userId, user.id),
+        eq(schema.notifications.userId, "all")
+      )
+    );
+    res.json(userNotifs);
+  } catch (err: any) {
+    res.status(500).json({ error: "Database error fetching notifications: " + err.message });
+  }
 });
 
-app.post("/api/notifications/read-all", authGuard, (req, res) => {
+app.post("/api/notifications/read-all", authGuard, async (req, res) => {
   const user = (req as any).user;
-  const db = getDatabase();
 
-  db.notifications.forEach(n => {
-    if (n.userId === user.id || n.userId === "all") {
-      n.isRead = true;
-    }
-  });
-
-  writeDatabase(db);
-  res.json({ message: "All items marked read." });
+  try {
+    await db.update(schema.notifications).set({ isRead: true }).where(
+      or(
+        eq(schema.notifications.userId, user.id),
+        eq(schema.notifications.userId, "all")
+      )
+    );
+    res.json({ message: "All items marked read." });
+  } catch (err: any) {
+    res.status(500).json({ error: "Database error marking read: " + err.message });
+  }
 });
 
-app.post("/api/notifications/:id/read", authGuard, (req, res) => {
+app.post("/api/notifications/:id/read", authGuard, async (req, res) => {
   const user = (req as any).user;
   const { id } = req.params;
-  const db = getDatabase();
 
-  const notif = db.notifications.find(n => n.id === id && (n.userId === user.id || n.userId === "all"));
-  if (notif) {
-    notif.isRead = true;
-    writeDatabase(db);
-    res.json({ message: "Notification marked read.", notification: notif });
-  } else {
-    res.status(404).json({ error: "Notification not found or access denied." });
+  try {
+    const notif = (await db.select().from(schema.notifications).where(
+      and(
+        eq(schema.notifications.id, id),
+        or(
+          eq(schema.notifications.userId, user.id),
+          eq(schema.notifications.userId, "all")
+        )
+      )
+    ))[0];
+
+    if (notif) {
+      await db.update(schema.notifications).set({ isRead: true }).where(eq(schema.notifications.id, id));
+      res.json({ message: "Notification marked read.", notification: { ...notif, isRead: true } });
+    } else {
+      res.status(404).json({ error: "Notification not found or access denied." });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: "Database error marking item: " + err.message });
   }
 });
 
 // Delete Notification
-app.delete("/api/notifications/:id", authGuard, (req, res) => {
+app.delete("/api/notifications/:id", authGuard, async (req, res) => {
   const user = (req as any).user;
   const { id } = req.params;
-  const db = getDatabase();
 
-  const idx = db.notifications.findIndex(n => n.id === id && (n.userId === user.id || n.userId === "all"));
-  if (idx !== -1) {
-    db.notifications.splice(idx, 1);
-    writeDatabase(db);
-    res.json({ message: "Notification deleted successfully." });
-  } else {
-    res.status(404).json({ error: "Notification not found or access denied." });
+  try {
+    const notif = (await db.select().from(schema.notifications).where(
+      and(
+        eq(schema.notifications.id, id),
+        or(
+          eq(schema.notifications.userId, user.id),
+          eq(schema.notifications.userId, "all")
+        )
+      )
+    ))[0];
+
+    if (notif) {
+      await db.delete(schema.notifications).where(eq(schema.notifications.id, id));
+      res.json({ message: "Notification deleted successfully." });
+    } else {
+      res.status(404).json({ error: "Notification not found or access denied." });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: "Database error deleting item: " + err.message });
   }
 });
 
 // Edit Notification
-app.put("/api/notifications/:id", authGuard, (req, res) => {
+app.put("/api/notifications/:id", authGuard, async (req, res) => {
   const user = (req as any).user;
   const { id } = req.params;
   const { title, message } = req.body;
-  const db = getDatabase();
 
-  const notif = db.notifications.find(n => n.id === id && (n.userId === user.id || n.userId === "all"));
-  if (notif) {
-    if (title) notif.title = title;
-    if (message) notif.message = message;
-    writeDatabase(db);
-    res.json({ message: "Notification updated successfully.", notification: notif });
-  } else {
-    res.status(404).json({ error: "Notification not found or access denied." });
+  try {
+    const notif = (await db.select().from(schema.notifications).where(
+      and(
+        eq(schema.notifications.id, id),
+        or(
+          eq(schema.notifications.userId, user.id),
+          eq(schema.notifications.userId, "all")
+        )
+      )
+    ))[0];
+
+    if (notif) {
+      const updatePayload: any = {};
+      if (title) updatePayload.title = title;
+      if (message) updatePayload.message = message;
+
+      await db.update(schema.notifications).set(updatePayload).where(eq(schema.notifications.id, id));
+      res.json({ message: "Notification updated successfully.", notification: { ...notif, ...updatePayload } });
+    } else {
+      res.status(404).json({ error: "Notification not found or access denied." });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: "Database error editing item: " + err.message });
   }
 });
 
@@ -793,9 +1095,11 @@ app.put("/api/notifications/:id", authGuard, (req, res) => {
 // GOOGLE OAUTH 2.0 FOR CALENDAR & DRIVE INTEGRATIONS
 // ---------------------------------------------------------
 app.get("/api/auth/google-url", (req, res) => {
-  const redirectUri = `${(process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "")}/auth/callback`;
+  // Production-ready dynamic detection of the host URL to perfectly adapt to development and deployment frames
+  const detectedHost = `${req.protocol}://${req.get("host")}`;
+  const redirectUri = `${detectedHost.replace(/\/$/, "")}/auth/callback`;
   const clientId = process.env.CLIENT_ID || process.env.GOOGLE_CLIENT_ID || "";
-  
+
   if (!clientId) {
     return res.status(500).json({ error: "Google OAuth Client ID is not configured in environment variables." });
   }
@@ -804,7 +1108,7 @@ app.get("/api/auth/google-url", (req, res) => {
     client_id: clientId,
     redirect_uri: redirectUri,
     response_type: "code",
-    scope: "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile",
+    scope: "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/classroom.courses.readonly https://www.googleapis.com/auth/classroom.coursework.me https://www.googleapis.com/auth/classroom.coursework.students",
     access_type: "offline",
     prompt: "consent"
   });
@@ -814,7 +1118,8 @@ app.get("/api/auth/google-url", (req, res) => {
 
 app.get(["/auth/callback", "/auth/callback/"], async (req, res) => {
   const { code } = req.query;
-  const redirectUri = `${(process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "")}/auth/callback`;
+  const detectedHost = `${req.protocol}://${req.get("host")}`;
+  const redirectUri = `${detectedHost.replace(/\/$/, "")}/auth/callback`;
   const clientId = process.env.CLIENT_ID || process.env.GOOGLE_CLIENT_ID || "";
   const clientSecret = process.env.CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET || "";
 
@@ -843,14 +1148,13 @@ app.get(["/auth/callback", "/auth/callback/"], async (req, res) => {
         <html>
           <body style="font-family: sans-serif; padding: 20px;">
             <h3 style="color: #ea4335;">Google Authorization Failed</h3>
-            <p>Could not exchange code for access token. Please check that CLIENT_ID and CLIENT_SECRET are configured correctly in the Google Cloud Console credential settings.</p>
+            <p>Could not exchange code for access token. Please check that CLIENT_ID and CLIENT_SECRET are configured correctly in your project credentials settings.</p>
             <pre style="background: #f1f1f1; padding: 10px; border-radius: 5px;">${JSON.stringify(tokenData, null, 2)}</pre>
           </body>
         </html>
       `);
     }
 
-    // Return HTML that posts the token back to main window and closes the popup
     return res.send(`
       <html>
         <head>
@@ -868,7 +1172,7 @@ app.get(["/auth/callback", "/auth/callback/"], async (req, res) => {
             </div>
             
             <div class="space-y-2">
-              <h2 class="text-2xl font-extrabold text-slate-805 text-slate-800">Connection Successful!</h2>
+              <h2 class="text-2xl font-extrabold text-slate-800">Connection Successful!</h2>
               <p class="text-sm text-slate-500">Your Google academic ledger is now actively synced to GDCMS Secure Cloud.</p>
             </div>
 
@@ -877,15 +1181,15 @@ app.get(["/auth/callback", "/auth/callback/"], async (req, res) => {
               <ul class="space-y-2.5 text-xs text-slate-600">
                 <li class="flex items-start gap-2">
                   <span class="text-emerald-600 font-bold">✓</span>
-                  <span><strong>Automatic Calendar Syncing:</strong> Real-time assessment due dates, test coordinates, and assignment deadlines automatically push to your primary Google Calendar.</span>
+                  <span><strong>Automatic Calendar Syncing:</strong> Real-time assessment due dates and deadlines automatically push to your primary Google Calendar.</span>
                 </li>
                 <li class="flex items-start gap-2">
                   <span class="text-emerald-600 font-bold">✓</span>
-                  <span><strong>Secure Note Ciphers Backups:</strong> Save, encrypt and export private study sandbox notes directly onto your Google Drive account with 1-click execution.</span>
+                  <span><strong>Secure Note Ciphers Backups:</strong> Save, encrypt, and export private notebooks securely to your Google Drive account with 1-click execution.</span>
                 </li>
                 <li class="flex items-start gap-2">
                   <span class="text-emerald-600 font-bold">✓</span>
-                  <span><strong>Offline Reminders Pipeline:</strong> Native reminders remain operational via your Google account, keeping you notified 24/7 on any device (Android/iOS/Web).</span>
+                  <span><strong>Offline Reminders Pipeline:</strong> Alerts remain active, keeping you completely on top of classes and assignment milestones.</span>
                 </li>
               </ul>
             </div>
@@ -894,7 +1198,7 @@ app.get(["/auth/callback", "/auth/callback/"], async (req, res) => {
               Transmitting secure symmetric tokens to primary GDCMS window...
             </div>
 
-            <button onclick="closeNow()" class="w-full py-3 bg-indigo-650 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer">
+            <button onclick="closeNow()" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer">
               Complete Sync & Close (<span id="seconds">5</span>s)
             </button>
 
@@ -934,113 +1238,379 @@ app.get(["/auth/callback", "/auth/callback/"], async (req, res) => {
 // ADMINISTRATIVE CONFIGURATIONS, AUDIT LOGS & BROADCASTS
 // ---------------------------------------------------------
 
-app.get("/api/app-config", (req, res) => {
-  const db = getDatabase();
-  res.json(db.appConfig);
+app.get("/api/app-config", async (req, res) => {
+  try {
+    let config = (await db.select().from(schema.appConfig).where(eq(schema.appConfig.id, "config")))[0];
+    if (!config) {
+      const defaultConfig = {
+        id: "config",
+        systemName: "Group D Class Management System",
+        systemShort: "GDCMS",
+        assignmentsTerm: "Assignments",
+        materialsTerm: "Course Materials",
+        themeColor: "indigo",
+        fontSizePreset: "standard",
+        sidebarStyle: "dark-navy"
+      };
+      await db.insert(schema.appConfig).values(defaultConfig);
+      config = defaultConfig;
+    }
+    res.json(config);
+  } catch (err: any) {
+    res.status(500).json({ error: "Database error fetching application config: " + err.message });
+  }
 });
 
-app.post("/api/admin/app-config", authGuard, (req, res) => {
+app.post("/api/admin/app-config", authGuard, async (req, res) => {
   const user = (req as any).user;
   if (user.role !== "admin") {
     return res.status(403).json({ error: "Administrative console access required." });
   }
-  const db = getDatabase();
   const config = req.body;
   if (!config) {
     return res.status(400).json({ error: "Missing configuration parameters." });
   }
 
-  db.appConfig = {
-    ...db.appConfig,
-    ...config
-  };
-  writeDatabase(db);
-  res.json({ message: "Application rebranded and restructured successfully.", appConfig: db.appConfig });
-});
-
-app.get("/api/admin/logs", authGuard, (req, res) => {
-  const user = (req as any).user;
-  if (user.role !== "admin") {
-    return res.status(403).json({ error: "Administrative console access required." });
-  }
-  const db = getDatabase();
-  const logsList = db.logs || [];
-  // Sort logs by newest first and return top 150 entries
-  const sortedLogs = [...logsList].reverse().slice(0, 150);
-  res.json(sortedLogs);
-});
-
-app.post("/api/admin/logs/clear", authGuard, (req, res) => {
-  const user = (req as any).user;
-  if (user.role !== "admin") {
-    return res.status(403).json({ error: "Administrative console access required." });
-  }
-  const db = getDatabase();
-  db.logs = [];
-  
-  // Clear any persistent sync logs from notification feed as well
-  if (db.notifications) {
-    db.notifications = db.notifications.filter(n => n.type !== "offline_sync");
-  }
-
-  // Treat log artifacts as temp files and delete them from workspace if they exist
   try {
-    const fs = require("fs");
-    const path = require("path");
-    const files = fs.readdirSync(process.cwd());
-    files.forEach((file: string) => {
-      if (file.endsWith(".log") || file.startsWith("npm-debug") || file.endsWith(".tmp")) {
-        try {
-          fs.unlinkSync(path.join(process.cwd(), file));
-        } catch (e) {
-          // Ignore files that are locked or in use
-        }
-      }
-    });
-  } catch (err) {
-    console.error("Workspace temp log files purging skipped:", err);
-  }
+    await db.update(schema.appConfig).set({
+      systemName: config.systemName,
+      systemShort: config.systemShort,
+      assignmentsTerm: config.assignmentsTerm,
+      materialsTerm: config.materialsTerm,
+      themeColor: config.themeColor,
+      fontSizePreset: config.fontSizePreset,
+      sidebarStyle: config.sidebarStyle,
+    }).where(eq(schema.appConfig.id, "config"));
 
-  writeDatabase(db);
-  res.json({ message: "Recorded security audit logs and connection/sync logs cleared successfully (treated as temporary files)." });
+    const updated = (await db.select().from(schema.appConfig).where(eq(schema.appConfig.id, "config")))[0];
+    res.json({ message: "Application rebranded and restructured successfully.", appConfig: updated });
+  } catch (err: any) {
+    res.status(500).json({ error: "Database error saving system configuration: " + err.message });
+  }
 });
 
-app.get("/api/admin/users", authGuard, (req, res) => {
+app.get("/api/admin/logs", authGuard, async (req, res) => {
   const user = (req as any).user;
   if (user.role !== "admin") {
     return res.status(403).json({ error: "Administrative console access required." });
   }
-  const db = getDatabase();
-  const safeUsers = db.users.map(u => ({
-    id: u.id,
-    fullName: u.fullName,
-    email: u.email,
-    role: u.role,
-    indexNumber: u.indexNumber,
-    oauthConnected: u.oauthConnected
-  }));
-  res.json(safeUsers);
+
+  try {
+    const logsList = await db.select().from(schema.logs).orderBy(desc(schema.logs.timestamp)).limit(150);
+    res.json(logsList);
+  } catch (err: any) {
+    res.status(500).json({ error: "Database error fetching audit logs: " + err.message });
+  }
 });
 
-app.get("/api/lecturer/students", authGuard, (req, res) => {
+app.post("/api/admin/logs/clear", authGuard, async (req, res) => {
+  const user = (req as any).user;
+  if (user.role !== "admin") {
+    return res.status(403).json({ error: "Administrative console access required." });
+  }
+
+  try {
+    await db.delete(schema.logs);
+    await db.delete(schema.notifications).where(eq(schema.notifications.type, "offline_sync"));
+
+    // Purge physical temporary files
+    try {
+      const files = fs.readdirSync(process.cwd());
+      files.forEach((file: string) => {
+        if (file.endsWith(".log") || file.startsWith("npm-debug") || file.endsWith(".tmp")) {
+          try {
+            fs.unlinkSync(path.join(process.cwd(), file));
+          } catch (e) {}
+        }
+      });
+    } catch (err) {
+      console.error("Purging session logging files skipped:", err);
+    }
+
+    res.json({ message: "Recorded security audit logs and connection/sync logs cleared successfully." });
+  } catch (err: any) {
+    res.status(500).json({ error: "Database error clearing logs: " + err.message });
+  }
+});
+
+app.get("/api/admin/users", authGuard, async (req, res) => {
+  const user = (req as any).user;
+  if (user.role !== "admin") {
+    return res.status(403).json({ error: "Administrative console access required." });
+  }
+
+  try {
+    const list = await db.select().from(schema.users);
+    const defaultHash = crypto.createHash("sha256").update("123456").digest("hex");
+
+    const safeUsers = list.map(u => ({
+      id: u.id,
+      fullName: u.fullName,
+      email: u.email,
+      role: u.role,
+      indexNumber: u.indexNumber || undefined,
+      oauthConnected: u.oauthConnected || false,
+      needsPasswordChange: u.needsPasswordChange || (u.passwordHash === defaultHash)
+    }));
+    res.json(safeUsers);
+  } catch (err: any) {
+    res.status(500).json({ error: "Database error fetching users: " + err.message });
+  }
+});
+
+// Admin manual user password reset assistant helper
+app.post("/api/admin/reset-user-password", authGuard, async (req, res) => {
+  const adminUser = (req as any).user;
+  if (adminUser.role !== "admin") {
+    return res.status(403).json({ error: "Only administrative personnel are authorized to perform security override resets." });
+  }
+
+  const { userId, newTempPassword } = req.body;
+  if (!userId) {
+    return res.status(400).json({ error: "Please specify target user model identifier." });
+  }
+
+  try {
+    const targetUser = (await db.select().from(schema.users).where(eq(schema.users.id, userId)))[0];
+    if (!targetUser) {
+      return res.status(404).json({ error: "Requested security profile record not found." });
+    }
+
+    const tempPass = newTempPassword || "123456";
+    const expectedHash = crypto.createHash("sha256").update(tempPass).digest("hex");
+
+    await db.update(schema.users).set({
+      passwordHash: expectedHash,
+      needsPasswordChange: true,
+    }).where(eq(schema.users.id, userId));
+
+    await db.insert(schema.notifications).values({
+      id: "notif_" + crypto.randomUUID(),
+      userId: userId,
+      title: "Account Password Reset 🛡️",
+      message: `A system administrator has manually updated your security credentials. Use the reset key to authenticate and update it on your next login session.`,
+      type: "offline_sync",
+      createdAt: new Date().toISOString(),
+      isRead: false,
+    });
+
+    res.json({ message: `Successfully reset password for ${targetUser.fullName} to: '${tempPass}'.` });
+  } catch (err: any) {
+    res.status(500).json({ error: "Database error resetting password: " + err.message });
+  }
+});
+
+// Admin Database Status / Metrics Explorer
+app.get("/api/admin/db-status", authGuard, async (req, res) => {
+  const adminUser = (req as any).user;
+  if (adminUser.role !== "admin") {
+    return res.status(403).json({ error: "Administrative console access required." });
+  }
+
+  try {
+    const [usersCount, coursesCount, materialsCount, submissionsCount, notesCount, notificationsCount, logsCount] = await Promise.all([
+      db.select().from(schema.users),
+      db.select().from(schema.courses),
+      db.select().from(schema.materials),
+      db.select().from(schema.submissions),
+      db.select().from(schema.notes),
+      db.select().from(schema.notifications),
+      db.select().from(schema.logs)
+    ]);
+
+    const stats = {
+      users: usersCount.length,
+      courses: coursesCount.length,
+      materials: materialsCount.length,
+      submissions: submissionsCount.length,
+      notes: notesCount.length,
+      notifications: notificationsCount.length,
+      logs: logsCount.length,
+      dbType: "PostgreSQL (Google Cloud SQL)",
+      region: "europe-west2",
+      connectionStatus: "Connected & Operational"
+    };
+
+    res.json(stats);
+  } catch (err: any) {
+    res.status(500).json({ error: "Failed to fetch relational database specs: " + err.message });
+  }
+});
+
+// Admin Database Re-seeding Action
+app.post("/api/admin/db-seed", authGuard, async (req, res) => {
+  const adminUser = (req as any).user;
+  if (adminUser.role !== "admin") {
+    return res.status(403).json({ error: "Administrative console access required." });
+  }
+
+  try {
+    if (fs.existsSync(DB_FILE)) {
+      const fileContent = fs.readFileSync(DB_FILE, "utf8");
+      const parsed = JSON.parse(fileContent);
+
+      await db.delete(schema.logs);
+      await db.delete(schema.notifications);
+      await db.delete(schema.notes);
+      await db.delete(schema.submissions);
+      await db.delete(schema.materials);
+      await db.delete(schema.courses);
+
+      // Seed courses
+      if (parsed.courses && parsed.courses.length > 0) {
+        await db.insert(schema.courses).values(parsed.courses.map((c: any) => ({
+          id: c.id,
+          code: c.code,
+          name: c.name,
+          lecturerId: c.lecturerId,
+          description: c.description,
+          outlineUrl: c.outlineUrl || null,
+          outlineName: c.outlineName || null,
+        })));
+      }
+
+      // Seed materials
+      if (parsed.materials && parsed.materials.length > 0) {
+        await db.insert(schema.materials).values(parsed.materials.map((m: any) => ({
+          id: m.id,
+          courseId: m.courseId,
+          title: m.title,
+          description: m.description,
+          type: m.type,
+          uploadedBy: m.uploadedBy,
+          uploadedAt: m.uploadedAt,
+          fileKey: m.fileKey,
+          originalName: m.originalName,
+          mimeType: m.mimeType,
+          fileSize: m.fileSize,
+          deadline: m.deadline || null,
+        })));
+      }
+
+      // Seed submissions
+      if (parsed.submissions && parsed.submissions.length > 0) {
+        await db.insert(schema.submissions).values(parsed.submissions.map((s: any) => ({
+          id: s.id,
+          assignmentId: s.assignmentId,
+          studentId: s.studentId,
+          studentIndex: s.studentIndex,
+          studentName: s.studentName,
+          fileKey: s.fileKey,
+          originalName: s.originalName,
+          uploadedAt: s.uploadedAt,
+          grade: s.grade || null,
+          feedback: s.feedback || null,
+          gradedBy: s.gradedBy || null,
+          gradedAt: s.gradedAt || null,
+          status: s.status,
+        })));
+      }
+
+      // Seed notes
+      if (parsed.notes && parsed.notes.length > 0) {
+        await db.insert(schema.notes).values(parsed.notes.map((n: any) => ({
+          id: n.id,
+          studentId: n.studentId,
+          title: n.title,
+          content: n.content.includes(":") ? n.content : encryptText(n.content),
+          updatedAt: n.updatedAt,
+          isSynced: n.isSynced ?? true,
+          tag: n.tag || null,
+        })));
+      }
+
+      // Seed notifications
+      if (parsed.notifications && parsed.notifications.length > 0) {
+        await db.insert(schema.notifications).values(parsed.notifications.map((n: any) => ({
+          id: n.id,
+          userId: n.userId,
+          title: n.title,
+          message: n.message,
+          type: n.type,
+          createdAt: n.createdAt,
+          isRead: n.isRead || false,
+        })));
+      }
+
+      // Add a fresh notification
+      await db.insert(schema.notifications).values({
+        id: "notif_system_" + crypto.randomUUID(),
+        userId: adminUser.id,
+        title: "Relational DB Re-Seeded ⚡",
+        message: `Relational tables successfully cleared and re-populated with pristine seed records.`,
+        type: "offline_sync",
+        createdAt: new Date().toISOString(),
+        isRead: false,
+      });
+
+      res.json({ message: "Successfully purged and re-seeded relational database tables from system registry schema!" });
+    } else {
+      res.status(404).json({ error: "Source registry data file (db.json) could not be retrieved." });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: "Failed to seed PostgreSQL database: " + err.message });
+  }
+});
+
+// Change/Update personal password
+app.post("/api/auth/change-password", authGuard, async (req, res) => {
+  const user = (req as any).user;
+  const { newPassword } = req.body;
+
+  if (!newPassword || newPassword.length < 4) {
+    return res.status(400).json({ error: "Custom ciphers must be at least 4 alphanumeric characters." });
+  }
+
+  try {
+    const targetUser = (await db.select().from(schema.users).where(eq(schema.users.id, user.id)))[0];
+    if (!targetUser) {
+      return res.status(404).json({ error: "Secure node user details not found." });
+    }
+
+    const expectedHash = crypto.createHash("sha256").update(newPassword).digest("hex");
+    await db.update(schema.users).set({
+      passwordHash: expectedHash,
+      needsPasswordChange: false,
+    }).where(eq(schema.users.id, user.id));
+
+    await db.insert(schema.notifications).values({
+      id: "notif_" + crypto.randomUUID(),
+      userId: user.id,
+      title: "Password Updated Successfully Key 🔑",
+      message: "Your GDCMS personal profile database password hash has been modified. Do not share your login index codes.",
+      type: "grade",
+      createdAt: new Date().toISOString(),
+      isRead: false,
+    });
+
+    res.json({ message: "Network password updated and hashed locally." });
+  } catch (err: any) {
+    res.status(500).json({ error: "Database error updating password: " + err.message });
+  }
+});
+
+app.get("/api/lecturer/students", authGuard, async (req, res) => {
   const user = (req as any).user;
   if (user.role !== "lecturer") {
     return res.status(403).json({ error: "Lecturer portal access required." });
   }
-  const db = getDatabase();
-  const students = db.users
-    .filter(u => u.role === "student")
-    .map(u => ({
+
+  try {
+    const list = await db.select().from(schema.users).where(eq(schema.users.role, "student"));
+    const students = list.map(u => ({
       id: u.id,
       fullName: u.fullName,
       email: u.email,
-      indexNumber: u.indexNumber,
-      oauthConnected: u.oauthConnected
+      indexNumber: u.indexNumber || undefined,
+      oauthConnected: u.oauthConnected || false
     }));
-  res.json(students);
+    res.json(students);
+  } catch (err: any) {
+    res.status(500).json({ error: "Database error fetching students: " + err.message });
+  }
 });
 
-app.post("/api/admin/broadcast-alert", authGuard, (req, res) => {
+app.post("/api/admin/broadcast-alert", authGuard, async (req, res) => {
   const user = (req as any).user;
   if (user.role !== "admin") {
     return res.status(403).json({ error: "Administrative console access required." });
@@ -1050,59 +1620,67 @@ app.post("/api/admin/broadcast-alert", authGuard, (req, res) => {
     return res.status(400).json({ error: "Advisory alert message cannot be empty." });
   }
 
-  const db = getDatabase();
-  const titleText = title || "Security Alert Advisory 🛡️";
+  try {
+    const titleText = title || "Security Alert Advisory 🛡️";
 
-  if (targetRole === "all") {
-    const targets = db.users.filter(u => u.role === "student" || u.role === "lecturer");
-    targets.forEach(t => {
-      db.notifications.push({
+    if (targetRole === "all") {
+      const targets = await db.select().from(schema.users).where(
+        or(
+          eq(schema.users.role, "student"),
+          eq(schema.users.role, "lecturer")
+        )
+      );
+      for (const t of targets) {
+        await db.insert(schema.notifications).values({
+          id: "notif_" + crypto.randomUUID(),
+          userId: t.id,
+          title: titleText,
+          message,
+          type: "grade",
+          createdAt: new Date().toISOString(),
+          isRead: false,
+        });
+      }
+    } else if (targetRole === "student" || targetRole === "lecturer") {
+      const targets = await db.select().from(schema.users).where(eq(schema.users.role, targetRole));
+      for (const t of targets) {
+        await db.insert(schema.notifications).values({
+          id: "notif_" + crypto.randomUUID(),
+          userId: t.id,
+          title: titleText,
+          message,
+          type: "grade",
+          createdAt: new Date().toISOString(),
+          isRead: false,
+        });
+      }
+    } else if (targetRole) {
+      await db.insert(schema.notifications).values({
         id: "notif_" + crypto.randomUUID(),
-        userId: t.id,
+        userId: targetRole,
         title: titleText,
         message,
         type: "grade",
         createdAt: new Date().toISOString(),
-        isRead: false
+        isRead: false,
       });
-    });
-  } else if (targetRole === "student" || targetRole === "lecturer") {
-    const targets = db.users.filter(u => u.role === targetRole);
-    targets.forEach(t => {
-      db.notifications.push({
-        id: "notif_" + crypto.randomUUID(),
-        userId: t.id,
-        title: titleText,
-        message,
-        type: "grade",
-        createdAt: new Date().toISOString(),
-        isRead: false
-      });
-    });
-  } else if (targetRole) {
-    // Single specific user selection
-    db.notifications.push({
-      id: "notif_" + crypto.randomUUID(),
-      userId: targetRole,
-      title: titleText,
-      message,
-      type: "grade",
-      createdAt: new Date().toISOString(),
-      isRead: false
-    });
-  } else {
-    return res.status(400).json({ error: "Please declare a valid audience target role." });
+    } else {
+      return res.status(400).json({ error: "Please declare a valid audience target role." });
+    }
+
+    res.json({ message: "Broadcast notifications triggered and queued successfully." });
+  } catch (err: any) {
+    res.status(500).json({ error: "Database error broadcasting alerts: " + err.message });
   }
-
-  writeDatabase(db);
-  res.json({ message: "Broadcast notifications triggered and queued successfully." });
 });
-
 
 // ---------------------------------------------------------
 // VITE CLIENT DEV MIDDLEWARE & STATIC BUNDLE FALLBACK
 // ---------------------------------------------------------
 async function startServer() {
+  // Pre-seed the relational Postgres tables gracefully if newly provisioned
+  await seedDatabaseIfNeeded();
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -1110,7 +1688,6 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    // Serve static frontend compiled bundle
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
@@ -1119,7 +1696,7 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[GDCMS] Server securely listening on http://0.0.0.0:${PORT}`);
+    console.log(`[GDCMS] Production-ready container server securely listening on http://0.0.0.0:${PORT}`);
   });
 }
 

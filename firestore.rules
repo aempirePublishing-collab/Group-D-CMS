@@ -1,0 +1,110 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper Functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Validation helpers
+    function isValidCourse(data) {
+      return data.id is string && data.id.size() <= 128
+          && data.code is string && data.code.size() <= 32
+          && data.name is string && data.name.size() <= 256
+          && data.lecturerId is string && data.lecturerId.size() <= 128
+          && data.description is string && data.description.size() <= 2048;
+    }
+
+    function isValidMaterial(data) {
+      return data.id is string && data.id.size() <= 128
+          && data.courseId is string && data.courseId.size() <= 128
+          && data.title is string && data.title.size() <= 256
+          && data.description is string && data.description.size() <= 2048
+          && (data.type == "outline" || data.type == "lecture_notes" || data.type == "assignment_prompt")
+          && data.uploadedBy is string && data.uploadedBy.size() <= 128
+          && data.uploadedAt is string && data.uploadedAt.size() <= 64
+          && data.fileKey is string && data.fileKey.size() <= 256
+          && data.originalName is string && data.originalName.size() <= 256
+          && data.mimeType is string && data.mimeType.size() <= 128
+          && data.fileSize is int;
+    }
+
+    function isValidSubmission(data) {
+      return data.id is string && data.id.size() <= 128
+          && data.assignmentId is string && data.assignmentId.size() <= 128
+          && data.studentId is string && data.studentId.size() <= 128
+          && data.studentIndex is string && data.studentIndex.size() <= 64
+          && data.studentName is string && data.studentName.size() <= 128
+          && data.fileKey is string && data.fileKey.size() <= 256
+          && data.originalName is string && data.originalName.size() <= 256
+          && data.uploadedAt is string && data.uploadedAt.size() <= 64
+          && data.status is string && data.status.size() <= 32;
+    }
+
+    function isValidNote(data) {
+      return data.id is string && data.id.size() <= 128
+          && data.studentId is string && data.studentId.size() <= 128
+          && data.title is string && data.title.size() <= 256
+          && data.content is string && data.content.size() <= 1048576
+          && data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    function isValidNotification(data) {
+      return data.id is string && data.id.size() <= 128
+          && data.userId is string && data.userId.size() <= 128
+          && data.title is string && data.title.size() <= 256
+          && data.message is string && data.message.size() <= 2048
+          && data.type is string && data.type.size() <= 64
+          && data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    // Rules for Courses
+    match /courses/{courseId} {
+      allow read: if isSignedIn() && isValidId(courseId);
+      allow create, update: if isSignedIn() && isValidId(courseId) && isValidCourse(request.resource.data);
+      allow delete: if false;
+    }
+
+    // Rules for Materials
+    match /materials/{materialId} {
+      allow read: if isSignedIn() && isValidId(materialId);
+      allow create, update: if isSignedIn() && isValidId(materialId) && isValidMaterial(request.resource.data);
+      allow delete: if false;
+    }
+
+    // Rules for Submissions
+    match /submissions/{submissionId} {
+      allow read: if isSignedIn() && isValidId(submissionId);
+      allow create, update: if isSignedIn() && isValidId(submissionId) && isValidSubmission(request.resource.data);
+      allow delete: if false;
+    }
+
+    // Rules for Notes
+    match /notes/{noteId} {
+      allow read: if isSignedIn() && isValidId(noteId) && (request.auth.uid == resource.data.studentId);
+      allow create, update: if isSignedIn() && isValidId(noteId) && isValidNote(request.resource.data) && (request.auth.uid == request.resource.data.studentId);
+      allow delete: if isSignedIn() && isValidId(noteId) && (request.auth.uid == resource.data.studentId);
+    }
+
+    // Rules for Notifications
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && isValidId(notificationId) && (request.auth.uid == resource.data.userId || resource.data.userId == "all");
+      allow create, update: if isSignedIn() && isValidId(notificationId) && isValidNotification(request.resource.data);
+      allow delete: if isSignedIn() && isValidId(notificationId) && (request.auth.uid == resource.data.userId || resource.data.userId == "all");
+    }
+  }
+}

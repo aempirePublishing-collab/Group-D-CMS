@@ -1,0 +1,112 @@
+{
+  "entities": {
+    "Course": {
+      "title": "Course",
+      "description": "Mirrored academic courses for offline reference",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "lecturerId": { "type": "string" },
+        "description": { "type": "string" },
+        "outlineUrl": { "type": "string" },
+        "outlineName": { "type": "string" }
+      },
+      "required": ["id", "code", "name", "lecturerId", "description"]
+    },
+    "Material": {
+      "title": "Material",
+      "description": "Mirrored academic course materials and assignment prompts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "courseId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "type": { "type": "string", "enum": ["outline", "lecture_notes", "assignment_prompt"] },
+        "uploadedBy": { "type": "string" },
+        "uploadedAt": { "type": "string" },
+        "fileKey": { "type": "string" },
+        "originalName": { "type": "string" },
+        "mimeType": { "type": "string" },
+        "fileSize": { "type": "integer" },
+        "deadline": { "type": "string" }
+      },
+      "required": ["id", "courseId", "title", "description", "type", "uploadedBy", "uploadedAt", "fileKey", "originalName", "mimeType", "fileSize"]
+    },
+    "Submission": {
+      "title": "Submission",
+      "description": "Mirrored student course assignment submissions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "assignmentId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentIndex": { "type": "string" },
+        "studentName": { "type": "string" },
+        "fileKey": { "type": "string" },
+        "originalName": { "type": "string" },
+        "uploadedAt": { "type": "string" },
+        "grade": { "type": "string" },
+        "feedback": { "type": "string" },
+        "gradedBy": { "type": "string" },
+        "gradedAt": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "assignmentId", "studentId", "studentIndex", "studentName", "fileKey", "originalName", "uploadedAt", "status"]
+    },
+    "Note": {
+      "title": "Note",
+      "description": "Encrypted student personal notebooks",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "isSynced": { "type": "boolean" },
+        "tag": { "type": "string" }
+      },
+      "required": ["id", "studentId", "title", "content", "updatedAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Mirrored in-app real-time alerts and notifications",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "isRead": { "type": "boolean" }
+      },
+      "required": ["id", "userId", "title", "message", "type", "createdAt"]
+    }
+  },
+  "firestore": {
+    "courses": {
+      "schema": { "$ref": "#/entities/Course" },
+      "description": "Mirrored courses table"
+    },
+    "materials": {
+      "schema": { "$ref": "#/entities/Material" },
+      "description": "Mirrored materials and assignment prompts"
+    },
+    "submissions": {
+      "schema": { "$ref": "#/entities/Submission" },
+      "description": "Mirrored assignment submissions"
+    },
+    "notes": {
+      "schema": { "$ref": "#/entities/Note" },
+      "description": "Encrypted personal study notes log"
+    },
+    "notifications": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "Mirrored central bell alerts and notifications"
+    }
+  }
+}

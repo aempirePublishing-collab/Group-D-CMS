@@ -7,14 +7,24 @@ interface OfflineIndicatorProps {
 }
 
 export default function OfflineIndicator({ token, onSyncSuccess }: OfflineIndicatorProps) {
-  const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
+  const [isOnline, setIsOnline] = useState<boolean>(() => {
+    return navigator.onLine && localStorage.getItem("gdcms_force_offline") !== "true";
+  });
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [offlineNotesCount, setOfflineNotesCount] = useState<number>(0);
 
+  const checkOnlineStatus = () => {
+    const forcedOffline = localStorage.getItem("gdcms_force_offline") === "true";
+    setIsOnline(navigator.onLine && !forcedOffline);
+  };
+
   useEffect(() => {
     const handleOnline = () => {
-      setIsOnline(true);
-      triggerNotesSync();
+      const forcedOffline = localStorage.getItem("gdcms_force_offline") === "true";
+      setIsOnline(!forcedOffline);
+      if (!forcedOffline) {
+        triggerNotesSync();
+      }
     };
     const handleOffline = () => {
       setIsOnline(false);
@@ -25,6 +35,7 @@ export default function OfflineIndicator({ token, onSyncSuccess }: OfflineIndica
 
     // Initial check for offline notes
     checkOfflineNotes();
+    checkOnlineStatus();
 
     return () => {
       window.removeEventListener("online", handleOnline);
@@ -48,7 +59,8 @@ export default function OfflineIndicator({ token, onSyncSuccess }: OfflineIndica
   };
 
   const triggerNotesSync = async () => {
-    if (!token || !navigator.onLine) return;
+    const forcedOffline = localStorage.getItem("gdcms_force_offline") === "true";
+    if (!token || !navigator.onLine || forcedOffline) return;
     try {
       const dbNotesStr = localStorage.getItem("gdcms_offline_notes");
       if (!dbNotesStr) return;
@@ -84,9 +96,15 @@ export default function OfflineIndicator({ token, onSyncSuccess }: OfflineIndica
   useEffect(() => {
     const interval = setInterval(() => {
       checkOfflineNotes();
+      checkOnlineStatus();
+      // Auto-trigger sync if we aren't forced offline and have pending notes
+      const forcedOffline = localStorage.getItem("gdcms_force_offline") === "true";
+      if (navigator.onLine && !forcedOffline && localStorage.getItem("gdcms_offline_notes")) {
+        triggerNotesSync();
+      }
     }, 4000);
     return () => clearInterval(interval);
-  }, []);
+  }, [token]);
 
   return (
     <div id="offline-status-banner" className="transition-all duration-300">
