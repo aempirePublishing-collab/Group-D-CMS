@@ -569,19 +569,36 @@ export default function App() {
     }
   };
 
-  // Load from local storage or cloud server config on startup
+  // Load from local storage or cloud server config on startup with connection retry policy
   const fetchGlobalConfigOnStartup = async () => {
-    try {
-      const res = await fetch("/api/app-config");
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.systemName) {
-          setAppConfig(data);
-          localStorage.setItem("gdcms_app_config", JSON.stringify(data));
+    let attempts = 3;
+    let delay = 800;
+    while (attempts > 0) {
+      try {
+        const res = await fetch("/api/app-config");
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.systemName) {
+            setAppConfig(data);
+            localStorage.setItem("gdcms_app_config", JSON.stringify(data));
+          }
+          return; // Success, exit retry loop
+        } else {
+          try {
+            const errText = await res.text();
+            console.warn(`[GDCMS] Server responded client app config request with non-ok status: ${res.status}. Response: ${errText}`);
+          } catch (_) {}
+        }
+      } catch (err) {
+        if (attempts === 1) {
+          console.log("[GDCMS] Note: Cloud branding server offline. Standard local client fallback in effect:", err);
         }
       }
-    } catch (err) {
-      console.error("Global config mount sync omitted:", err);
+      attempts--;
+      if (attempts > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        delay *= 1.5; // Exponential backoff timing
+      }
     }
   };
 
@@ -1748,20 +1765,22 @@ export default function App() {
               G
             </div>
             <div className="flex flex-col">
-              <span className="text-sm font-black tracking-tight uppercase text-indigo-950">GDCMS</span>
-              <span className="text-[9px] text-slate-500 tracking-wider uppercase font-bold">Group D Portal</span>
+              <span id="welcome-logo-title-span" className="text-sm font-black tracking-tight uppercase text-indigo-950">GDCMS</span>
+              <span id="welcome-logo-subtitle-span" className="text-[9px] text-slate-500 tracking-wider uppercase font-bold">Group D Portal</span>
             </div>
           </div>
 
           {authView === "welcome" && (
             <nav className="hidden md:flex items-center space-x-6 text-xs font-bold text-slate-600">
               <button 
+                id="welcome-nav-purpose-btn" 
                 onClick={() => handleSmoothScroll(purposeRef)} 
                 className="hover:text-indigo-600 transition-colors cursor-pointer"
               >
                 Our Purpose
               </button>
               <button 
+                id="welcome-nav-modules-btn" 
                 onClick={() => handleSmoothScroll(modulesRef)} 
                 className="hover:text-indigo-600 transition-colors cursor-pointer"
               >
@@ -1782,6 +1801,7 @@ export default function App() {
 
             {authView !== "welcome" ? (
               <button
+                id="welcome-nav-signin-btn"
                 onClick={() => { setAuthView("welcome"); setAuthError(null); }}
                 className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-705 text-xs font-bold rounded-xl transition-all cursor-pointer"
               >
@@ -1789,6 +1809,7 @@ export default function App() {
               </button>
             ) : (
               <button
+                id="welcome-nav-signin-btn"
                 onClick={() => { setAuthView("login"); setAuthError(null); }}
                 className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-all shadow-md cursor-pointer"
               >
@@ -1803,16 +1824,16 @@ export default function App() {
           <main className="flex-1 flex flex-col">
             
             {/* HERO INTRODUCTION FOLD */}
-            <section className="bg-gradient-to-b from-slate-100 to-white py-16 px-6 border-b border-slate-200">
+            <section id="welcome-hero-section" className="bg-gradient-to-b from-slate-100 to-white py-16 px-6 border-b border-slate-200">
               <div className="max-w-4xl mx-auto text-center space-y-6">
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-indigo-50 border border-indigo-100 rounded-full text-[10px] font-extrabold text-indigo-700 uppercase tracking-widest leading-none">
+                <div id="welcome-hero-badge" className="inline-flex items-center gap-1.5 px-3 py-1 bg-indigo-50 border border-indigo-100 rounded-full text-[10px] font-extrabold text-indigo-700 uppercase tracking-widest leading-none">
                   <span className="w-1.5 h-1.5 bg-indigo-600 rounded-full animate-ping"></span>
                   Official Release • Group D Class Management System
                 </div>
                 
-                <h1 className="text-4xl md:text-5xl font-black text-slate-900 tracking-tight leading-none md:leading-tight">
+                <h1 id="welcome-hero-title" className="text-4xl md:text-5xl font-black text-slate-900 tracking-tight leading-none md:leading-tight">
                   Academic Operations, <br className="hidden sm:block" />
-                  <span className="text-indigo-600">Streamlined for Group D.</span>
+                  <span id="welcome-hero-title-accent" className="text-indigo-600">Streamlined for Group D.</span>
                 </h1>
 
                 <p className="text-slate-600 text-sm md:text-base max-w-2xl mx-auto leading-relaxed font-medium">
@@ -1921,10 +1942,10 @@ export default function App() {
                 <div className="inline-flex items-center justify-center w-12 h-12 bg-indigo-600 text-white rounded-2xl mb-4 shadow-sm shadow-indigo-600/10">
                   <Layers className="w-6 h-6" />
                 </div>
-                <h2 className="text-2xl font-normal text-[#1e1e1e] tracking-tight">
+                <h2 id="auth-h2-title" className="text-2xl font-normal text-[#1e1e1e] tracking-tight">
                   {authView === "login" ? "Sign in" : "Create account"}
                 </h2>
-                <p className="text-sm text-[#444746] mt-2">
+                <p id="auth-p-subtitle" className="text-sm text-[#444746] mt-2">
                   to continue to the GDCMS Portal
                 </p>
               </div>
@@ -2101,8 +2122,8 @@ export default function App() {
                 </button>
               </form>
 
-              {/* Switch directions */}
-              <div className="text-center pt-2">
+               {/* Switch directions */}
+              <div id="auth-switch-directions-div" className="text-center pt-2">
                 <button
                   type="button"
                   onClick={() => { setAuthView("welcome"); setAuthError(null); }}

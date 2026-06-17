@@ -4286,3 +4286,219 @@ html.dark body,
         transform: none
     }
 }
+
+#welcome-hero-section,
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#welcome-hero-section:nth-of-type(1) {
+  margin-left: 0px;
+  margin-right: 0px;
+  background-color: #f5f5f5;
+  background-image: linear-gradient(45deg, #f5f5f5, #e0e0e0);
+}
+
+.dark #welcome-hero-section,
+.dark div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#welcome-hero-section:nth-of-type(1) {
+  background-color: #0f172a;
+  background-image: linear-gradient(45deg, #090d16, #111a2e);
+}
+
+#welcome-hero-title,
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#welcome-hero-section:nth-of-type(1) > div:nth-of-type(1) > h1#welcome-hero-title:nth-of-type(1) {
+  background-color: #d6d6d6;
+  color: #fefefe;
+  border-width: 0px;
+  border-style: inset;
+  border-radius: 50px;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#welcome-hero-section:nth-of-type(1) > div:nth-of-type(1) > h1#welcome-hero-title:nth-of-type(1) > span#welcome-hero-title-accent:nth-of-type(1) {
+
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#welcome-hero-section:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > button:nth-of-type(2) {
+  background-color: #151a70;
+  color: #ffffff;
+}
+
+#welcome-hero-badge {
+  color: #3e24ed;
+}
+
+/* --- LIGHT MODE SPECIFIC STYLES --- */
+#welcome-logo-title-span {
+  color: #1e1b4b; /* dark indigo-950 */
+}
+
+#welcome-nav-purpose-btn {
+  color: #475569; /* slate-600 */
+}
+
+#welcome-nav-modules-btn {
+  color: #475569; /* slate-600 */
+}
+
+#welcome-hero-title-accent {
+  font-family: Arial;
+  font-style: normal;
+  text-decoration-line: none;
+  font-size: 45px;
+}
+
+#welcome-logo-subtitle-span {
+  color: #062cff;
+}
+
+#welcome-nav-signin-btn {
+  color: #ffffff;
+}
+
+#auth-h2-title,
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > h2:nth-of-type(1) {
+  color: #1e293b;
+}
+
+#auth-p-subtitle,
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > p:nth-of-type(1) {
+  color: #475569;
+  text-decoration-line: underline;
+}
+
+#auth-switch-directions-div,
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(4) {
+  text-decoration-line: underline;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#modules:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > h4:nth-of-type(1),
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#modules:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) > h4:nth-of-type(1),
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#modules:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(3) > h4:nth-of-type(1) {
+  color: #1e293b;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#purpose:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) > h3:nth-of-type(1),
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#purpose:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > h3:nth-of-type(1) {
+  color: #1e293b;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#purpose:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) > p:nth-of-type(1) {
+  color: #0048ff;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#purpose:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) > h2:nth-of-type(1) {
+  color: #1d00ff;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#modules:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > h2:nth-of-type(1) {
+  color: #0066f8;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#modules:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > p:nth-of-type(1) {
+  color: #475569;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > footer:nth-of-type(1) > div:nth-of-type(2) > span:nth-of-type(2) {
+  color: #2a2be7;
+}
+
+/* --- DARK MODE SPECIFIC OVERRIDES --- */
+.dark #welcome-logo-title-span {
+  color: #ffffff;
+}
+
+.dark #welcome-nav-purpose-btn {
+  color: #fbfbfb;
+}
+
+.dark #welcome-nav-modules-btn {
+  color: #ffffff;
+}
+
+.dark #welcome-nav-signin-btn {
+  color: #ffffff;
+}
+
+.dark #auth-h2-title,
+.dark div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > h2:nth-of-type(1) {
+  color: #ffffff;
+}
+
+.dark #auth-p-subtitle,
+.dark div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > p:nth-of-type(1) {
+  color: #ffffff;
+}
+
+.dark div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#modules:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > h4:nth-of-type(1),
+.dark div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#modules:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) > h4:nth-of-type(1),
+.dark div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#modules:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(3) > h4:nth-of-type(1) {
+  color: #ffffff;
+}
+
+.dark div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#purpose:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) > h3:nth-of-type(1),
+.dark div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#purpose:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > h3:nth-of-type(1) {
+  color: #ffffff;
+}
+
+.dark div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#modules:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > p:nth-of-type(1) {
+  color: #ffffff;
+}
+
+/* Precise CSS overrides for focus-mode selectors */
+div#root:nth-of-type(1) > div:nth-of-type(1) > header:nth-of-type(1) {
+  background-color: #2c3d74;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#welcome-hero-section:nth-of-type(1) > div:nth-of-type(1) > p:nth-of-type(1) {
+  color: #98b0cb;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#purpose:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > p:nth-of-type(1) {
+  color: #5e80b0;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#purpose:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) > p:nth-of-type(1) {
+  color: #5e7eb2;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#modules:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > p:nth-of-type(1) {
+  color: #5e80b2;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#modules:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) > p:nth-of-type(1) {
+  color: #5e80b2;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#modules:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(3) > p:nth-of-type(1) {
+  color: #5e80b2;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > p#auth-p-subtitle:nth-of-type(1) {
+  text-decoration-line: none;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > header:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > span#welcome-logo-title-span:nth-of-type(1) {
+  color: #ffffff;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#welcome-hero-section:nth-of-type(1) > div:nth-of-type(1) > h1#welcome-hero-title:nth-of-type(1) {
+  border-style: none;
+  border-radius: 0px;
+  margin-bottom: 28px;
+  margin-top: 3px;
+  margin-left: 59px;
+  margin-right: 60px;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > header:nth-of-type(1) {
+
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > header:nth-of-type(1) > nav:nth-of-type(1) > button#welcome-nav-purpose-btn:nth-of-type(1) {
+  color: #ffffff;
+}
+
+div#root:nth-of-type(1) > div:nth-of-type(1) > header:nth-of-type(1) > nav:nth-of-type(1) > button#welcome-nav-modules-btn:nth-of-type(2) {
+  color: #fefefe;
+}
+
+
+
