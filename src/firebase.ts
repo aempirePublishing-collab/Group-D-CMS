@@ -254,3 +254,150 @@ export async function deleteSingleNoteFromFirestore(noteId: string) {
     console.warn("GDCMS: FireStore delete single note failed (will queue):", e);
   }
 }
+
+// 6. Sync / Seed Trial and Registered Users to Firestore
+export async function seedTrialUsersToFirestore() {
+  await ensureFirebaseAuth();
+  try {
+    const trials = [
+      {
+        id: "student_1",
+        indexNumber: "BC/ITN/25/147",
+        fullName: "Clement Koffie",
+        email: "koffieclement12@gmail.com",
+        role: "student",
+        oauthConnected: false
+      },
+      {
+        id: "student_2",
+        indexNumber: "BC/ITN/25/112",
+        fullName: "Sarah Jenkins",
+        email: "sarah.j@student.edu",
+        role: "student",
+        oauthConnected: false
+      },
+      {
+        id: "student_3",
+        indexNumber: "BC/ITN/25/115",
+        fullName: "Alex Rivera",
+        email: "alex.r@student.edu",
+        role: "student",
+        oauthConnected: false
+      },
+      {
+        id: "student_4",
+        indexNumber: "BC/ITN/25/119",
+        fullName: "Jordan Vance",
+        email: "jordan.v@student.edu",
+        role: "student",
+        oauthConnected: false
+      },
+      {
+        id: "student_5",
+        indexNumber: "BC/ITN/25/122",
+        fullName: "Taylor Swift",
+        email: "taylor.s@student.edu",
+        role: "student",
+        oauthConnected: false
+      },
+      {
+        id: "student_6",
+        indexNumber: "BC/ITN/25/133",
+        fullName: "Daniel Craig",
+        email: "daniel.c@student.edu",
+        role: "student",
+        oauthConnected: false
+      },
+      {
+        id: "student_7",
+        indexNumber: "BC/ITN/25/154",
+        fullName: "Elena Rostova",
+        email: "elena.r@student.edu",
+        role: "student",
+        oauthConnected: false
+      },
+      {
+        id: "student_8",
+        indexNumber: "BC/ITN/25/177",
+        fullName: "Fatima Al-Sayed",
+        email: "fatima.as@student.edu",
+        role: "student",
+        oauthConnected: false
+      },
+      {
+        id: "student_9",
+        indexNumber: "BC/ITN/25/188",
+        fullName: "Marcus Aurelius",
+        email: "marcus.a@student.edu",
+        role: "student",
+        oauthConnected: false
+      },
+      {
+        id: "student_10",
+        indexNumber: "BC/ITN/25/199",
+        fullName: "Zoe Kravitz",
+        email: "zoe.k@student.edu",
+        role: "student",
+        oauthConnected: false
+      },
+      {
+        id: "lecturer_1",
+        indexNumber: "L-9001",
+        fullName: "Dr. Emmanuel Vance",
+        email: "emmanuel.vance@gdcms.edu",
+        role: "lecturer",
+        oauthConnected: true
+      },
+      {
+        id: "lecturer_2",
+        indexNumber: "L-9002",
+        fullName: "Prof. Alan Turing",
+        email: "alan.turing@gdcms.edu",
+        role: "lecturer",
+        oauthConnected: false
+      },
+      {
+        id: "lecturer_3",
+        indexNumber: "L-9003",
+        fullName: "Dr. Grace Hopper",
+        email: "grace.hopper@gdcms.edu",
+        role: "lecturer",
+        oauthConnected: false
+      },
+      {
+        id: "admin_1",
+        indexNumber: "A-0001",
+        fullName: "Admin Coordinator",
+        email: "admin@gdcms.edu",
+        role: "admin",
+        oauthConnected: false
+      },
+      {
+        id: "admin_2",
+        indexNumber: "A-0002",
+        fullName: "Secondary Admin Coordinator",
+        email: "admin2@gdcms.edu",
+        role: "admin",
+        oauthConnected: false
+      }
+    ];
+    
+    const batch = writeBatch(db);
+    trials.forEach(u => {
+      const uRef = doc(db, "users", u.id);
+      batch.set(uRef, {
+        id: u.id,
+        indexNumber: u.indexNumber,
+        fullName: u.fullName,
+        email: u.email,
+        role: u.role,
+        oauthConnected: u.oauthConnected
+      });
+    });
+    await batch.commit();
+    console.log("GDCMS: 15 system accounts successfully exported and synchronous-locked in Firebase Firestore.");
+  } catch (err) {
+    console.warn("GDCMS: Failed to seed trial users to Firestore", err);
+  }
+}
+

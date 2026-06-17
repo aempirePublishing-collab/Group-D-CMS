@@ -245,7 +245,7 @@ async function seedDatabaseIfNeeded() {
             fullName: u.fullName,
             email: u.email,
             role: u.role,
-            passwordHash: u.id === "student_1" || u.id === "student_2" || u.id === "lecturer_1" || u.id === "admin_1" ? expectedHash : (u.passwordHash || null),
+            passwordHash: u.passwordHash || expectedHash,
             oauthConnected: u.oauthConnected || false,
             needsPasswordChange: u.needsPasswordChange || false,
           })));
@@ -632,7 +632,12 @@ app.post("/api/auth/logout", (req, res) => {
 
 // List active Courses
 app.get("/api/courses", authGuard, async (req, res) => {
+  const user = (req as any).user;
   try {
+    if (user.role === "lecturer") {
+      const lecturerCourses = await db.select().from(schema.courses).where(eq(schema.courses.lecturerId, user.id));
+      return res.json(lecturerCourses);
+    }
     const allCourses = await db.select().from(schema.courses);
     res.json(allCourses);
   } catch (err: any) {
@@ -642,7 +647,19 @@ app.get("/api/courses", authGuard, async (req, res) => {
 
 // Get Materials List for active Courses
 app.get("/api/materials", authGuard, async (req, res) => {
+  const user = (req as any).user;
   try {
+    if (user.role === "lecturer") {
+      const lecturerCourses = await db.select().from(schema.courses).where(eq(schema.courses.lecturerId, user.id));
+      const courseIds = lecturerCourses.map(c => c.id);
+      if (courseIds.length === 0) {
+        return res.json([]);
+      }
+      const lecturerMaterials = await db.select().from(schema.materials).where(
+        or(...courseIds.map(cid => eq(schema.materials.courseId, cid)))
+      );
+      return res.json(lecturerMaterials);
+    }
     const allMaterials = await db.select().from(schema.materials);
     res.json(allMaterials);
   } catch (err: any) {
@@ -664,6 +681,16 @@ app.post("/api/materials/upload", authGuard, async (req, res) => {
   }
 
   try {
+    if (user.role === "lecturer") {
+      const courseObj = (await db.select().from(schema.courses).where(eq(schema.courses.id, courseId)))[0];
+      if (!courseObj) {
+        return res.status(404).json({ error: "The designated course does not exist in GDCMS archives." });
+      }
+      if (courseObj.lecturerId !== user.id) {
+        return res.status(403).json({ error: "Access Denied: You can only upload material to your own courses." });
+      }
+    }
+
     const buffer = Buffer.from(fileData, "base64");
     const fileSize = buffer.length;
 
@@ -728,6 +755,7 @@ app.post("/api/materials/upload", authGuard, async (req, res) => {
 // Decrypt and DOWNLOAD / Stream encrypted file at rest securely
 app.get("/api/materials/download/:id", authGuard, async (req, res) => {
   const materialId = req.params.id;
+  const user = (req as any).user;
 
   try {
     const material = (await db.select().from(schema.materials).where(eq(schema.materials.id, materialId)))[0];
@@ -737,6 +765,29 @@ app.get("/api/materials/download/:id", authGuard, async (req, res) => {
 
     if (!fileMeta) {
       return res.status(404).json({ error: "Document item not found in database records." });
+    }
+
+    // Role-based access checks
+    if (user.role === "student") {
+      if (submission && submission.studentId !== user.id) {
+        return res.status(403).json({ error: "Access Denied: You are not authorized to view this student submission." });
+      }
+    } else if (user.role === "lecturer") {
+      if (material) {
+        const course = (await db.select().from(schema.courses).where(eq(schema.courses.id, material.courseId)))[0];
+        if (!course || course.lecturerId !== user.id) {
+          return res.status(403).json({ error: "Access Denied: You can only access materials belonging to your own courses." });
+        }
+      } else if (submission) {
+        const assignment = (await db.select().from(schema.materials).where(eq(schema.materials.id, submission.assignmentId)))[0];
+        if (!assignment) {
+          return res.status(404).json({ error: "Source assignment prompt not found." });
+        }
+        const course = (await db.select().from(schema.courses).where(eq(schema.courses.id, assignment.courseId)))[0];
+        if (!course || course.lecturerId !== user.id) {
+          return res.status(403).json({ error: "Access Denied: You can only view submissions for courses you teach." });
+        }
+      }
     }
 
     const filePath = path.join(UPLOADS_DIR, fileMeta.fileKey);
@@ -772,6 +823,25 @@ app.get("/api/submissions", authGuard, async (req, res) => {
     if (user.role === "student") {
       const studentSubs = await db.select().from(schema.submissions).where(eq(schema.submissions.studentId, user.id));
       return res.json(studentSubs);
+    }
+
+    if (user.role === "lecturer") {
+      const lecturerCourses = await db.select().from(schema.courses).where(eq(schema.courses.lecturerId, user.id));
+      const courseIds = lecturerCourses.map(c => c.id);
+      if (courseIds.length === 0) {
+        return res.json([]);
+      }
+      const lecturerMaterials = await db.select().from(schema.materials).where(
+        or(...courseIds.map(cid => eq(schema.materials.courseId, cid)))
+      );
+      const assignmentIds = lecturerMaterials.map(m => m.id);
+      if (assignmentIds.length === 0) {
+        return res.json([]);
+      }
+      const lecturerSubs = await db.select().from(schema.submissions).where(
+        or(...assignmentIds.map(aid => eq(schema.submissions.assignmentId, aid)))
+      );
+      return res.json(lecturerSubs);
     }
 
     const allSubs = await db.select().from(schema.submissions);
@@ -900,6 +970,17 @@ app.post("/api/submissions/grade", authGuard, async (req, res) => {
 
     if (!sub) {
       return res.status(404).json({ error: "Specified student submission is missing." });
+    }
+
+    if (user.role === "lecturer") {
+      const assignment = (await db.select().from(schema.materials).where(eq(schema.materials.id, sub.assignmentId)))[0];
+      if (!assignment) {
+        return res.status(404).json({ error: "Source assignment reference not found." });
+      }
+      const course = (await db.select().from(schema.courses).where(eq(schema.courses.id, assignment.courseId)))[0];
+      if (!course || course.lecturerId !== user.id) {
+        return res.status(403).json({ error: "Access Denied: You can only grade submissions for courses you teach." });
+      }
     }
 
     const gradedAtVal = new Date().toISOString();
@@ -1106,6 +1187,54 @@ app.get("/api/notifications", authGuard, async (req, res) => {
         eq(schema.notifications.userId, "all")
       )
     );
+
+    if (user.role === "student") {
+      const allMaterials = await db.select().from(schema.materials).where(eq(schema.materials.type, "assignment_prompt"));
+      const userSubmissions = await db.select().from(schema.submissions).where(eq(schema.submissions.studentId, user.id));
+
+      const now = new Date();
+      for (const mat of allMaterials) {
+        // Has student already submitted?
+        const hasSubmitted = userSubmissions.some(s => s.assignmentId === mat.id);
+        if (hasSubmitted) continue;
+
+        // Parse deadline
+        let deadlineDateStr = mat.deadline;
+        if (!deadlineDateStr) {
+          const cy = now.getFullYear();
+          const cm = now.getMonth();
+          deadlineDateStr = `${cy}-${String(cm + 1).padStart(2, "0")}-25T23:59:00Z`;
+        } else if (!deadlineDateStr.includes("T")) {
+          deadlineDateStr = `${deadlineDateStr}T23:59:00Z`;
+        }
+
+        const deadlineTime = new Date(deadlineDateStr).getTime();
+        const nowTime = now.getTime();
+        const diffMs = deadlineTime - nowTime;
+
+        // Trigger is 24 hours before the deadline (diffMs <= 24 hours, and still in the future)
+        if (diffMs > 0 && diffMs <= 24 * 60 * 60 * 1000) {
+          const alertId = `warning_dl_${mat.id}_${user.id}`;
+          const existingWarning = userNotifs.find(n => n.id === alertId);
+
+          if (!existingWarning) {
+            const deadlineNotif = {
+              id: alertId,
+              userId: user.id,
+              title: `Deadline Alert: ${mat.title} ⏳`,
+              message: `This pending assessment is due in less than 24 hours (due at ${new Date(deadlineDateStr).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})})! Submit your coursework upload now.`,
+              type: "assignment",
+              createdAt: now.toISOString(),
+              isRead: false,
+            };
+
+            await db.insert(schema.notifications).values(deadlineNotif);
+            userNotifs.push(deadlineNotif as any);
+          }
+        }
+      }
+    }
+
     res.json(userNotifs);
   } catch (err: any) {
     res.status(500).json({ error: "Database error fetching notifications: " + err.message });
@@ -1718,7 +1847,38 @@ app.get("/api/lecturer/students", authGuard, async (req, res) => {
   }
 
   try {
-    const list = await db.select().from(schema.users).where(eq(schema.users.role, "student"));
+    // Determine the lecturer's own courses
+    const lecturerCourses = await db.select().from(schema.courses).where(eq(schema.courses.lecturerId, user.id));
+    const courseIds = lecturerCourses.map(c => c.id);
+
+    let studentIds: string[] = [];
+
+    if (courseIds.length > 0) {
+      // Find all materials (assignment prompts) belonging to these courses
+      const lecturerMaterials = await db.select().from(schema.materials).where(
+        or(...courseIds.map(cid => eq(schema.materials.courseId, cid)))
+      );
+      const assignmentIds = lecturerMaterials.map(m => m.id);
+
+      if (assignmentIds.length > 0) {
+        // Collect submissions made to those assignment prompts
+        const studentSubmissions = await db.select().from(schema.submissions).where(
+          or(...assignmentIds.map(aid => eq(schema.submissions.assignmentId, aid)))
+        );
+        studentIds = Array.from(new Set(studentSubmissions.map(s => s.studentId)));
+      }
+    }
+
+    let list: any[] = [];
+    if (studentIds.length > 0) {
+      list = await db.select().from(schema.users).where(
+        and(
+          eq(schema.users.role, "student"),
+          or(...studentIds.map(sid => eq(schema.users.id, sid)))
+        )
+      );
+    }
+
     const students = list.map(u => ({
       id: u.id,
       fullName: u.fullName,

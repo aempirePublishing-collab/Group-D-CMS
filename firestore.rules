@@ -72,6 +72,13 @@ service cloud.firestore {
           && data.createdAt is string && data.createdAt.size() <= 64;
     }
 
+    function isValidUser(data) {
+      return data.id is string && data.id.size() <= 128
+          && data.fullName is string && data.fullName.size() <= 128
+          && data.email is string && data.email.size() <= 128
+          && data.role is string && (data.role == "student" || data.role == "lecturer" || data.role == "admin");
+    }
+
     // Rules for Courses
     match /courses/{courseId} {
       allow read: if isSignedIn() && isValidId(courseId);
@@ -105,6 +112,13 @@ service cloud.firestore {
       allow read: if isSignedIn() && isValidId(notificationId) && (request.auth.uid == resource.data.userId || resource.data.userId == "all");
       allow create, update: if isSignedIn() && isValidId(notificationId) && isValidNotification(request.resource.data);
       allow delete: if isSignedIn() && isValidId(notificationId) && (request.auth.uid == resource.data.userId || resource.data.userId == "all");
+    }
+
+    // Rules for Users
+    match /users/{userId} {
+      allow read: if isSignedIn() && isValidId(userId);
+      allow create, update: if isSignedIn() && isValidId(userId) && isValidUser(request.resource.data);
+      allow delete: if false;
     }
   }
 }

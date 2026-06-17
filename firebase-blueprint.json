@@ -85,6 +85,20 @@
         "isRead": { "type": "boolean" }
       },
       "required": ["id", "userId", "title", "message", "type", "createdAt"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Mirrored trial and academic platform users",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "indexNumber": { "type": "string" },
+        "fullName": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "oauthConnected": { "type": "boolean" }
+      },
+      "required": ["id", "fullName", "email", "role"]
     }
   },
   "firestore": {
@@ -107,6 +121,10 @@
     "notifications": {
       "schema": { "$ref": "#/entities/Notification" },
       "description": "Mirrored central bell alerts and notifications"
+    },
+    "users": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Mirrored system user and profile accounts"
     }
   }
 }

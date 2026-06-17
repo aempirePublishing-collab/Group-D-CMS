@@ -19,6 +19,78 @@
       "oauthConnected": false
     },
     {
+      "id": "student_3",
+      "indexNumber": "BC/ITN/25/115",
+      "fullName": "Alex Rivera",
+      "email": "alex.r@student.edu",
+      "role": "student",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "oauthConnected": false
+    },
+    {
+      "id": "student_4",
+      "indexNumber": "BC/ITN/25/119",
+      "fullName": "Jordan Vance",
+      "email": "jordan.v@student.edu",
+      "role": "student",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "oauthConnected": false
+    },
+    {
+      "id": "student_5",
+      "indexNumber": "BC/ITN/25/122",
+      "fullName": "Taylor Swift",
+      "email": "taylor.s@student.edu",
+      "role": "student",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "oauthConnected": false
+    },
+    {
+      "id": "student_6",
+      "indexNumber": "BC/ITN/25/133",
+      "fullName": "Daniel Craig",
+      "email": "daniel.c@student.edu",
+      "role": "student",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "oauthConnected": false
+    },
+    {
+      "id": "student_7",
+      "indexNumber": "BC/ITN/25/154",
+      "fullName": "Elena Rostova",
+      "email": "elena.r@student.edu",
+      "role": "student",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "oauthConnected": false
+    },
+    {
+      "id": "student_8",
+      "indexNumber": "BC/ITN/25/177",
+      "fullName": "Fatima Al-Sayed",
+      "email": "fatima.as@student.edu",
+      "role": "student",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "oauthConnected": false
+    },
+    {
+      "id": "student_9",
+      "indexNumber": "BC/ITN/25/188",
+      "fullName": "Marcus Aurelius",
+      "email": "marcus.a@student.edu",
+      "role": "student",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "oauthConnected": false
+    },
+    {
+      "id": "student_10",
+      "indexNumber": "BC/ITN/25/199",
+      "fullName": "Zoe Kravitz",
+      "email": "zoe.k@student.edu",
+      "role": "student",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "oauthConnected": false
+    },
+    {
       "id": "lecturer_1",
       "indexNumber": "L-9001",
       "fullName": "Dr. Emmanuel Vance",
@@ -28,10 +100,37 @@
       "oauthConnected": true
     },
     {
+      "id": "lecturer_2",
+      "indexNumber": "L-9002",
+      "fullName": "Prof. Alan Turing",
+      "email": "alan.turing@gdcms.edu",
+      "role": "lecturer",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "oauthConnected": false
+    },
+    {
+      "id": "lecturer_3",
+      "indexNumber": "L-9003",
+      "fullName": "Dr. Grace Hopper",
+      "email": "grace.hopper@gdcms.edu",
+      "role": "lecturer",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "oauthConnected": false
+    },
+    {
       "id": "admin_1",
       "indexNumber": "A-0001",
       "fullName": "Admin Coordinator",
       "email": "admin@gdcms.edu",
+      "role": "admin",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "oauthConnected": false
+    },
+    {
+      "id": "admin_2",
+      "indexNumber": "A-0002",
+      "fullName": "Secondary Admin Coordinator",
+      "email": "admin2@gdcms.edu",
       "role": "admin",
       "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
       "oauthConnected": false
@@ -51,6 +150,20 @@
       "name": "Information Systems Security & Cryptography",
       "lecturerId": "lecturer_1",
       "description": "Introduction to authentication, symmetric/asymmetric algorithms, AES encryption, RSA, hashing functions, and cloud security frameworks."
+    },
+    {
+      "id": "course_cs201",
+      "code": "CS 201",
+      "name": "Discrete Mathematics",
+      "lecturerId": "lecturer_2",
+      "description": "Explores logical reasoning, proof validation, graph theory, combinatorics, counting, sets, relations and boolean functions."
+    },
+    {
+      "id": "course_cs402",
+      "code": "CS 402",
+      "name": "Compiler Construction",
+      "lecturerId": "lecturer_3",
+      "description": "Focuses on lexing, parsing (LR/LL), AST representations, intermediate representation (IR) code emission and optimizations."
     }
   ],
   "materials": [

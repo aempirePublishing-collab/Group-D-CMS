@@ -66,7 +66,8 @@ import {
   getOfflineNotes,
   getOfflineNotifications,
   saveSingleNoteToFirestore,
-  deleteSingleNoteFromFirestore
+  deleteSingleNoteFromFirestore,
+  seedTrialUsersToFirestore
 } from "./firebase";
 
 export default function App() {
@@ -1152,6 +1153,7 @@ export default function App() {
       if (fetchedSubmissions.length > 0) syncSubmissionsToFirestore(fetchedSubmissions);
       if (fetchedNotes.length > 0) syncNotesToFirestore(fetchedNotes);
       if (fetchedNotifs.length > 0) syncNotificationsToFirestore(fetchedNotifs);
+      seedTrialUsersToFirestore();
 
       const activeUser = userObj || currentUser;
       if (activeUser) {
