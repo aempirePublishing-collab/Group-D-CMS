@@ -227,7 +227,7 @@ export default function GoogleKeepPanel({
         <div className="space-y-1.5 min-w-0">
           <h4 className="font-extrabold text-xs text-[#9E4100] uppercase tracking-wider">Workspace Connection Sync Notice</h4>
           <p className="text-[#A43B00] text-[11px] leading-relaxed select-none">
-            Google Keep OAuth endpoints are restricted to certified enterprise domains. GDCMS integrates a **Virtual Sticky Adapter** allowing offline encrypted storage combined with an instant **Link to Google Keep** clipboard exporter, letting notes synchronize with your official accounts in one touch.
+            Google Keep workspace channel uses an optimized clipboard sync adapter. Create and style your personal lecture logs below, and click **Export ↗** to sync or archive notes to your official Google accounts.
           </p>
         </div>
       </div>

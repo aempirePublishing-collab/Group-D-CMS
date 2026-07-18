@@ -1,15 +1,24 @@
 import React, { useState, useEffect } from "react";
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, BookOpen, Clock, RefreshCw } from "lucide-react";
-import { Material } from "../types";
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, BookOpen, Clock, RefreshCw, Check } from "lucide-react";
+import { Material, Submission } from "../types";
 
 interface DeadlineCalendarProps {
   materials: Material[];
+  submissions?: Submission[];
+  onMarkAsSubmitted?: (asgId: string) => void;
   onSelectAssignment?: (asgId: string) => void;
   googleToken?: string | null;
   onConnectGoogle?: () => void;
 }
 
-export default function DeadlineCalendar({ materials, onSelectAssignment, googleToken, onConnectGoogle }: DeadlineCalendarProps) {
+export default function DeadlineCalendar({
+  materials,
+  submissions = [],
+  onMarkAsSubmitted,
+  onSelectAssignment,
+  googleToken,
+  onConnectGoogle
+}: DeadlineCalendarProps) {
   // We can show June 2026 as it matches the current active semester/month in the database
   const [currentYear, setCurrentYear] = useState(2026);
   const [currentMonth, setCurrentMonth] = useState(5); // June (0-indexed)
@@ -269,6 +278,12 @@ export default function DeadlineCalendar({ materials, onSelectAssignment, google
           const hasAssignment = dayAssignments.length > 0;
           const hasGoogleEvent = dayGoogleEvents.length > 0;
 
+          // Check if any assignment on this day is still uncompleted/unsubmitted
+          const hasUncompletedAssignment = dayAssignments.some(asg => {
+            const isSubmitted = submissions.some(sub => sub.assignmentId === asg.id);
+            return !isSubmitted;
+          });
+
           const isToday = currentYear === 2026 && currentMonth === 5 && day === 10;
           const isSelected = selectedDay === day;
 
@@ -293,8 +308,14 @@ export default function DeadlineCalendar({ materials, onSelectAssignment, google
               <div className="flex gap-0.5 justify-center mt-0.5">
                 {hasAssignment && (
                   <div
-                    className={`w-1 h-1 rounded-full ${isSelected ? "bg-white" : "bg-rose-500 animate-pulse"}`}
-                    title="Deadline"
+                    className={`w-1 h-1 rounded-full ${
+                      isSelected 
+                        ? "bg-white" 
+                        : hasUncompletedAssignment 
+                          ? "bg-rose-500 animate-pulse" 
+                          : "bg-emerald-500"
+                    }`}
+                    title={hasUncompletedAssignment ? "Pending Deadline" : "Syllabus Submitted"}
                   />
                 )}
                 {hasGoogleEvent && (
@@ -327,39 +348,63 @@ export default function DeadlineCalendar({ materials, onSelectAssignment, google
         ) : (
           <div className="space-y-1.5">
             {/* Local Assessment Deadlines list */}
-            {activeDayAssignments.map(asg => (
-              <div
-                key={asg.id}
-                onClick={() => onSelectAssignment && onSelectAssignment(asg.id)}
-                className="bg-white p-2 border border-slate-150 hover:border-indigo-400 transition-colors rounded-xl cursor-pointer text-left space-y-1.5 block relative group"
-              >
-                <div className="flex items-center justify-between gap-1">
-                  <div className="flex items-center gap-1 text-indigo-700 font-bold text-[10px] leading-tight truncate">
-                    <BookOpen className="w-3 h-3 text-indigo-500 shrink-0" />
-                    <span className="truncate">{asg.title}</span>
+            {activeDayAssignments.map(asg => {
+              const isSubmitted = submissions.some(sub => sub.assignmentId === asg.id);
+              return (
+                <div
+                  key={asg.id}
+                  onClick={() => onSelectAssignment && onSelectAssignment(asg.id)}
+                  className="bg-white p-2.5 border border-slate-150 hover:border-indigo-400 transition-colors rounded-xl cursor-pointer text-left space-y-1.5 block relative group"
+                >
+                  <div className="flex items-center justify-between gap-1">
+                    <div className="flex items-center gap-1 text-indigo-700 font-bold text-[10px] leading-tight truncate">
+                      <BookOpen className="w-3 h-3 text-indigo-500 shrink-0" />
+                      <span className="truncate">{asg.title}</span>
+                    </div>
+                    
+                    {googleToken && (
+                      <button
+                        type="button"
+                        disabled={exportingAsgId === asg.id}
+                        onClick={(e) => handleExportToGoogleCalendar(asg, e)}
+                        className="text-[8px] bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-black px-1.5 py-0.5 rounded border border-emerald-150 transition-colors shrink-0 cursor-pointer ml-1"
+                        title="Add this deadline event to Google Calendar"
+                      >
+                        {exportingAsgId === asg.id ? "Adding..." : "+ Google Cal"}
+                      </button>
+                    )}
                   </div>
                   
-                  {googleToken && (
-                    <button
-                      type="button"
-                      disabled={exportingAsgId === asg.id}
-                      onClick={(e) => handleExportToGoogleCalendar(asg, e)}
-                      className="text-[8px] bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-black px-1.5 py-0.5 rounded border border-emerald-150 transition-colors shrink-0 cursor-pointer ml-1"
-                      title="Add this deadline event to Google Calendar"
-                    >
-                      {exportingAsgId === asg.id ? "Adding..." : "+ Google Cal"}
-                    </button>
+                  <div className="flex items-center justify-between text-[9px] font-bold">
+                    {isSubmitted ? (
+                      <span className="text-emerald-600 font-black inline-flex items-center gap-0.5 bg-emerald-50/50 px-1.5 py-0.5 rounded border border-emerald-100">
+                        <Check className="w-2.5 h-2.5" /> Handed In
+                      </span>
+                    ) : (
+                      <span className="text-rose-600 font-bold inline-flex items-center gap-0.5">
+                        <Clock className="w-2.5 h-2.5" /> Assessment Deadline
+                      </span>
+                    )}
+                    <span className="text-slate-400">Click to view assignment</span>
+                  </div>
+
+                  {!isSubmitted && onMarkAsSubmitted && (
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onMarkAsSubmitted(asg.id);
+                        }}
+                        className="w-full py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-850 font-extrabold text-[9px] uppercase tracking-wider rounded-lg border border-indigo-200 transition-all cursor-pointer text-center block active:scale-97"
+                      >
+                        ✓ Mark as Submitted
+                      </button>
+                    </div>
                   )}
                 </div>
-                
-                <div className="flex items-center justify-between text-[9px] text-slate-400 font-bold">
-                  <span className="text-rose-600 font-bold inline-flex items-center gap-0.5">
-                    <Clock className="w-2.5 h-2.5" /> Assessment Deadline
-                  </span>
-                  <span>Click to view material</span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
 
             {/* Google Calendar sync schedules list */}
             {activeDayGoogleEvents.map(evt => (

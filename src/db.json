@@ -1,13 +1,14 @@
 {
   "users": [
     {
-      "id": "student_1",
-      "indexNumber": "BC/ITN/25/147",
-      "fullName": "Clement Koffie",
-      "email": "koffieclement12@gmail.com",
-      "role": "student",
+      "id": "admin_1",
+      "indexNumber": "A-0001",
+      "fullName": "Admin Coordinator",
+      "email": "admin@gdcms.edu",
+      "role": "admin",
       "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
-      "oauthConnected": false
+      "oauthConnected": false,
+      "needsPasswordChange": false
     },
     {
       "id": "student_2",
@@ -16,115 +17,8 @@
       "email": "sarah.j@student.edu",
       "role": "student",
       "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
-      "oauthConnected": false
-    },
-    {
-      "id": "student_3",
-      "indexNumber": "BC/ITN/25/115",
-      "fullName": "Alex Rivera",
-      "email": "alex.r@student.edu",
-      "role": "student",
-      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
-      "oauthConnected": false
-    },
-    {
-      "id": "student_4",
-      "indexNumber": "BC/ITN/25/119",
-      "fullName": "Jordan Vance",
-      "email": "jordan.v@student.edu",
-      "role": "student",
-      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
-      "oauthConnected": false
-    },
-    {
-      "id": "student_5",
-      "indexNumber": "BC/ITN/25/122",
-      "fullName": "Taylor Swift",
-      "email": "taylor.s@student.edu",
-      "role": "student",
-      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
-      "oauthConnected": false
-    },
-    {
-      "id": "student_6",
-      "indexNumber": "BC/ITN/25/133",
-      "fullName": "Daniel Craig",
-      "email": "daniel.c@student.edu",
-      "role": "student",
-      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
-      "oauthConnected": false
-    },
-    {
-      "id": "student_7",
-      "indexNumber": "BC/ITN/25/154",
-      "fullName": "Elena Rostova",
-      "email": "elena.r@student.edu",
-      "role": "student",
-      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
-      "oauthConnected": false
-    },
-    {
-      "id": "student_8",
-      "indexNumber": "BC/ITN/25/177",
-      "fullName": "Fatima Al-Sayed",
-      "email": "fatima.as@student.edu",
-      "role": "student",
-      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
-      "oauthConnected": false
-    },
-    {
-      "id": "student_9",
-      "indexNumber": "BC/ITN/25/188",
-      "fullName": "Marcus Aurelius",
-      "email": "marcus.a@student.edu",
-      "role": "student",
-      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
-      "oauthConnected": false
-    },
-    {
-      "id": "student_10",
-      "indexNumber": "BC/ITN/25/199",
-      "fullName": "Zoe Kravitz",
-      "email": "zoe.k@student.edu",
-      "role": "student",
-      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
-      "oauthConnected": false
-    },
-    {
-      "id": "lecturer_1",
-      "indexNumber": "L-9001",
-      "fullName": "Dr. Emmanuel Vance",
-      "email": "emmanuel.vance@gdcms.edu",
-      "role": "lecturer",
-      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
-      "oauthConnected": true
-    },
-    {
-      "id": "lecturer_2",
-      "indexNumber": "L-9002",
-      "fullName": "Prof. Alan Turing",
-      "email": "alan.turing@gdcms.edu",
-      "role": "lecturer",
-      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
-      "oauthConnected": false
-    },
-    {
-      "id": "lecturer_3",
-      "indexNumber": "L-9003",
-      "fullName": "Dr. Grace Hopper",
-      "email": "grace.hopper@gdcms.edu",
-      "role": "lecturer",
-      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
-      "oauthConnected": false
-    },
-    {
-      "id": "admin_1",
-      "indexNumber": "A-0001",
-      "fullName": "Admin Coordinator",
-      "email": "admin@gdcms.edu",
-      "role": "admin",
-      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
-      "oauthConnected": false
+      "oauthConnected": false,
+      "needsPasswordChange": false
     },
     {
       "id": "admin_2",
@@ -133,7 +27,128 @@
       "email": "admin2@gdcms.edu",
       "role": "admin",
       "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
-      "oauthConnected": false
+      "oauthConnected": false,
+      "needsPasswordChange": false
+    },
+    {
+      "id": "student_3",
+      "indexNumber": "BC/ITN/25/115",
+      "fullName": "Alex Rivera",
+      "email": "alex.r@student.edu",
+      "role": "student",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "oauthConnected": false,
+      "needsPasswordChange": false
+    },
+    {
+      "id": "student_4",
+      "indexNumber": "BC/ITN/25/119",
+      "fullName": "Jordan Vance",
+      "email": "jordan.v@student.edu",
+      "role": "student",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "oauthConnected": false,
+      "needsPasswordChange": false
+    },
+    {
+      "id": "student_5",
+      "indexNumber": "BC/ITN/25/122",
+      "fullName": "Taylor Swift",
+      "email": "taylor.s@student.edu",
+      "role": "student",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "oauthConnected": false,
+      "needsPasswordChange": false
+    },
+    {
+      "id": "student_8",
+      "indexNumber": "BC/ITN/25/177",
+      "fullName": "Fatima Al-Sayed",
+      "email": "fatima.as@student.edu",
+      "role": "student",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "oauthConnected": false,
+      "needsPasswordChange": false
+    },
+    {
+      "id": "student_6",
+      "indexNumber": "BC/ITN/25/133",
+      "fullName": "Daniel Craig",
+      "email": "daniel.c@student.edu",
+      "role": "student",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "oauthConnected": false,
+      "needsPasswordChange": false
+    },
+    {
+      "id": "student_9",
+      "indexNumber": "BC/ITN/25/188",
+      "fullName": "Marcus Aurelius",
+      "email": "marcus.a@student.edu",
+      "role": "student",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "oauthConnected": false,
+      "needsPasswordChange": false
+    },
+    {
+      "id": "student_7",
+      "indexNumber": "BC/ITN/25/154",
+      "fullName": "Elena Rostova",
+      "email": "elena.r@student.edu",
+      "role": "student",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "oauthConnected": false,
+      "needsPasswordChange": false
+    },
+    {
+      "id": "student_10",
+      "indexNumber": "BC/ITN/25/199",
+      "fullName": "Zoe Kravitz",
+      "email": "zoe.k@student.edu",
+      "role": "student",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "oauthConnected": false,
+      "needsPasswordChange": false
+    },
+    {
+      "id": "lecturer_1",
+      "indexNumber": "L-9001",
+      "fullName": "Dr. Emmanuel Vance",
+      "email": "emmanuel.vance@gdcms.edu",
+      "role": "lecturer",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "oauthConnected": true,
+      "needsPasswordChange": false
+    },
+    {
+      "id": "lecturer_2",
+      "indexNumber": "L-9002",
+      "fullName": "Prof. Alan Turing",
+      "email": "alan.turing@gdcms.edu",
+      "role": "lecturer",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "oauthConnected": false,
+      "needsPasswordChange": false
+    },
+    {
+      "id": "lecturer_3",
+      "indexNumber": "L-9003",
+      "fullName": "Dr. Grace Hopper",
+      "email": "grace.hopper@gdcms.edu",
+      "role": "lecturer",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "oauthConnected": false,
+      "needsPasswordChange": false
+    },
+    {
+      "id": "student_1",
+      "indexNumber": "BC/ITN/25/147",
+      "fullName": "Clement Koffie",
+      "email": "koffieclement12@gmail.com",
+      "role": "student",
+      "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+      "oauthConnected": false,
+      "needsPasswordChange": false
     }
   ],
   "courses": [
@@ -142,28 +157,36 @@
       "code": "ITN 302",
       "name": "Data Communication & Computer Networks",
       "lecturerId": "lecturer_1",
-      "description": "Fundamental concepts in network topologies, layer architectures, routing protocols, and client-server network socket programming."
+      "description": "Fundamental concepts in network topologies, layer architectures, routing protocols, and client-server network socket programming.",
+      "outlineUrl": null,
+      "outlineName": null
     },
     {
       "id": "course_syssec401",
       "code": "SEC 401",
       "name": "Information Systems Security & Cryptography",
       "lecturerId": "lecturer_1",
-      "description": "Introduction to authentication, symmetric/asymmetric algorithms, AES encryption, RSA, hashing functions, and cloud security frameworks."
+      "description": "Introduction to authentication, symmetric/asymmetric algorithms, AES encryption, RSA, hashing functions, and cloud security frameworks.",
+      "outlineUrl": null,
+      "outlineName": null
     },
     {
       "id": "course_cs201",
       "code": "CS 201",
       "name": "Discrete Mathematics",
       "lecturerId": "lecturer_2",
-      "description": "Explores logical reasoning, proof validation, graph theory, combinatorics, counting, sets, relations and boolean functions."
+      "description": "Explores logical reasoning, proof validation, graph theory, combinatorics, counting, sets, relations and boolean functions.",
+      "outlineUrl": null,
+      "outlineName": null
     },
     {
       "id": "course_cs402",
       "code": "CS 402",
       "name": "Compiler Construction",
       "lecturerId": "lecturer_3",
-      "description": "Focuses on lexing, parsing (LR/LL), AST representations, intermediate representation (IR) code emission and optimizations."
+      "description": "Focuses on lexing, parsing (LR/LL), AST representations, intermediate representation (IR) code emission and optimizations.",
+      "outlineUrl": null,
+      "outlineName": null
     }
   ],
   "materials": [
@@ -178,7 +201,8 @@
       "fileKey": "syllabus_sec401.enc",
       "originalName": "SEC401_Syllabus.pdf",
       "mimeType": "application/pdf",
-      "fileSize": 328000
+      "fileSize": 328000,
+      "deadline": null
     },
     {
       "id": "mat_2",
@@ -191,7 +215,8 @@
       "fileKey": "notes_intro_aes.enc",
       "originalName": "SEC401_Lecture1_AES.pdf",
       "mimeType": "application/pdf",
-      "fileSize": 1420000
+      "fileSize": 1420000,
+      "deadline": null
     },
     {
       "id": "mat_3",
@@ -204,7 +229,50 @@
       "fileKey": "assignment_tcp_socket.enc",
       "originalName": "ITN302_Assignment1.pdf",
       "mimeType": "application/pdf",
-      "fileSize": 450000
+      "fileSize": 450000,
+      "deadline": "2026-06-25T23:59:00Z"
+    },
+    {
+      "id": "mat_4",
+      "courseId": "course_syssec401",
+      "title": "Assignment 2: AES Key Expansion & Ciphertext Cryptanalysis",
+      "description": "Analyze key scheduling steps in Advanced Encryption Standard (AES-128/192/256) and perform differential analysis on 4-round SPN ciphers.",
+      "type": "assignment_prompt",
+      "uploadedBy": "lecturer_1",
+      "uploadedAt": "2026-06-12T11:00:00Z",
+      "fileKey": "assignment_aes_cryptanalysis.enc",
+      "originalName": "SEC401_Assignment2_AES_Key.pdf",
+      "mimeType": "application/pdf",
+      "fileSize": 395000,
+      "deadline": "2026-06-15T23:59:00Z"
+    },
+    {
+      "id": "mat_5",
+      "courseId": "course_cs201",
+      "title": "Assignment 1: Propositional Logic Proofs & Set Relations",
+      "description": "Formulate mathematical proofs for propositional logic equivalences and establish partition equivalences for relation sets.",
+      "type": "assignment_prompt",
+      "uploadedBy": "lecturer_2",
+      "uploadedAt": "2026-06-14T09:00:00Z",
+      "fileKey": "assignment_discrete_proofs.enc",
+      "originalName": "CS201_Assignment1_Proofs.pdf",
+      "mimeType": "application/pdf",
+      "fileSize": 284000,
+      "deadline": "2026-06-20T23:59:00Z"
+    },
+    {
+      "id": "mat_6",
+      "courseId": "course_cs402",
+      "title": "Assignment 1: Lexical Parsing & Abstract Syntax Tree (AST)",
+      "description": "Construct a parser grammar in Yacc/Bison that accepts basic mathematical statements and yields an accurate AST dump.",
+      "type": "assignment_prompt",
+      "uploadedBy": "lecturer_3",
+      "uploadedAt": "2026-06-16T15:00:00Z",
+      "fileKey": "assignment_compiler_lex.enc",
+      "originalName": "CS402_Assignment1_AST.pdf",
+      "mimeType": "application/pdf",
+      "fileSize": 320000,
+      "deadline": "2026-06-26T23:59:00Z"
     }
   ],
   "submissions": [
@@ -231,19 +299,11 @@
       "title": "Exam Prep on Cipher Block Chaining (CBC)",
       "content": "Make sure to remember: 1. Initialization Vector (IV) must be completely random. 2. Plaintext is XORed with previous ciphertext block. 3. Identical plaintext blocks will result in entirely different ciphertext blocks.",
       "updatedAt": "2026-06-09T18:00:00Z",
-      "isSynced": true
+      "isSynced": true,
+      "tag": null
     }
   ],
   "notifications": [
-    {
-      "id": "notif_1",
-      "userId": "student_1",
-      "title": "New Grade Published! 🎉",
-      "message": "Dr. Vance has graded your ITN 302 - Assignment 1 submission. You scored an A!",
-      "type": "grade",
-      "createdAt": "2026-06-09T11:22:00Z",
-      "isRead": false
-    },
     {
       "id": "notif_2",
       "userId": "all",
@@ -251,6 +311,15 @@
       "message": "Dr. Vance uploaded Lecture Slide 1: Introduction to AES & DES Cryptography.",
       "type": "material",
       "createdAt": "2026-06-03T14:30:00Z",
+      "isRead": true
+    },
+    {
+      "id": "notif_1",
+      "userId": "student_1",
+      "title": "New Grade Published! 🎉",
+      "message": "Dr. Vance has graded your ITN 302 - Assignment 1 submission. You scored an A!",
+      "type": "grade",
+      "createdAt": "2026-06-09T11:22:00Z",
       "isRead": true
     }
   ],
@@ -263,6 +332,15 @@
       "reason": "Interactive portal portal authorization granted",
       "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
       "ipPlaceholder": "154.161.170.147, 169.254.169.126"
+    },
+    {
+      "id": "log_f2872264-726a-4e60-b5ca-a0d93142f4d9",
+      "timestamp": "2026-07-18T15:08:42.019Z",
+      "emailOrIndex": "BC/ITN/25/147",
+      "status": "success",
+      "reason": "Interactive portal portal authorization granted",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+      "ipPlaceholder": "154.161.155.189, 169.254.169.126"
     }
   ],
   "appConfig": {

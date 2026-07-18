@@ -231,145 +231,208 @@ async function seedDatabaseIfNeeded() {
   try {
     const existingUsers = await db.select().from(schema.users).limit(1);
     if (existingUsers.length === 0) {
-      console.log("[GDCMS] Database is empty, seeding from db.json...");
+      console.log("[GDCMS] Database is empty, seeding database...");
+      
+      let parsed: any = {
+        users: [],
+        courses: [],
+        materials: [],
+        submissions: [],
+        notes: [],
+        notifications: [],
+        logs: [],
+        appConfig: null
+      };
+
       if (fs.existsSync(DB_FILE)) {
-        const fileContent = fs.readFileSync(DB_FILE, "utf8");
-        const parsed = JSON.parse(fileContent);
-
-        // Seed users
-        if (parsed.users && parsed.users.length > 0) {
-          const expectedHash = crypto.createHash("sha256").update("123456").digest("hex");
-          await db.insert(schema.users).values(parsed.users.map((u: any) => ({
-            id: u.id,
-            indexNumber: u.indexNumber || null,
-            fullName: u.fullName,
-            email: u.email,
-            role: u.role,
-            passwordHash: u.passwordHash || expectedHash,
-            oauthConnected: u.oauthConnected || false,
-            needsPasswordChange: u.needsPasswordChange || false,
-          })));
+        try {
+          const fileContent = fs.readFileSync(DB_FILE, "utf8");
+          parsed = JSON.parse(fileContent);
+        } catch (e: any) {
+          console.error("[GDCMS] Failed to parse db.json, using defaults.", e.message);
         }
-
-        // Seed courses
-        if (parsed.courses && parsed.courses.length > 0) {
-          await db.insert(schema.courses).values(parsed.courses.map((c: any) => ({
-            id: c.id,
-            code: c.code,
-            name: c.name,
-            lecturerId: c.lecturerId,
-            description: c.description,
-            outlineUrl: c.outlineUrl || null,
-            outlineName: c.outlineName || null,
-          })));
-        }
-
-        // Seed materials
-        if (parsed.materials && parsed.materials.length > 0) {
-          await db.insert(schema.materials).values(parsed.materials.map((m: any) => ({
-            id: m.id,
-            courseId: m.courseId,
-            title: m.title,
-            description: m.description,
-            type: m.type,
-            uploadedBy: m.uploadedBy,
-            uploadedAt: m.uploadedAt,
-            fileKey: m.fileKey,
-            originalName: m.originalName,
-            mimeType: m.mimeType,
-            fileSize: m.fileSize,
-            deadline: m.deadline || null,
-          })));
-        }
-
-        // Seed submissions
-        if (parsed.submissions && parsed.submissions.length > 0) {
-          await db.insert(schema.submissions).values(parsed.submissions.map((s: any) => ({
-            id: s.id,
-            assignmentId: s.assignmentId,
-            studentId: s.studentId,
-            studentIndex: s.studentIndex,
-            studentName: s.studentName,
-            fileKey: s.fileKey,
-            originalName: s.originalName,
-            uploadedAt: s.uploadedAt,
-            grade: s.grade || null,
-            feedback: s.feedback || null,
-            gradedBy: s.gradedBy || null,
-            gradedAt: s.gradedAt || null,
-            status: s.status,
-          })));
-        }
-
-        // Seed notes
-        if (parsed.notes && parsed.notes.length > 0) {
-          await db.insert(schema.notes).values(parsed.notes.map((n: any) => ({
-            id: n.id,
-            studentId: n.studentId,
-            title: n.title,
-            content: n.content.includes(":") ? n.content : encryptText(n.content),
-            updatedAt: n.updatedAt,
-            isSynced: n.isSynced ?? true,
-            tag: n.tag || null,
-          })));
-        }
-
-        // Seed notifications
-        if (parsed.notifications && parsed.notifications.length > 0) {
-          await db.insert(schema.notifications).values(parsed.notifications.map((n: any) => ({
-            id: n.id,
-            userId: n.userId,
-            title: n.title,
-            message: n.message,
-            type: n.type,
-            createdAt: n.createdAt,
-            isRead: n.isRead || false,
-          })));
-        }
-
-        // Seed logs
-        if (parsed.logs && parsed.logs.length > 0) {
-          await db.insert(schema.logs).values(parsed.logs.map((l: any) => ({
-            id: l.id,
-            timestamp: l.timestamp,
-            emailOrIndex: l.emailOrIndex,
-            status: l.status,
-            reason: l.reason || null,
-            userAgent: l.userAgent || null,
-            ipPlaceholder: l.ipPlaceholder || null,
-          })));
-        }
-
-        // Seed appConfig
-        if (parsed.appConfig) {
-          await db.insert(schema.appConfig).values({
-            id: "config",
-            systemName: parsed.appConfig.systemName,
-            systemShort: parsed.appConfig.systemShort,
-            assignmentsTerm: parsed.appConfig.assignmentsTerm,
-            materialsTerm: parsed.appConfig.materialsTerm,
-            themeColor: parsed.appConfig.themeColor,
-            fontSizePreset: parsed.appConfig.fontSizePreset,
-            sidebarStyle: parsed.appConfig.sidebarStyle,
-          });
-        }
-        console.log("[GDCMS] PostgreSQL seeding complete!");
-      } else {
-        await db.insert(schema.appConfig).values({
-          id: "config",
-          systemName: "Group D Class Management System",
-          systemShort: "GDCMS",
-          assignmentsTerm: "Assignments",
-          materialsTerm: "Course Materials",
-          themeColor: "indigo",
-          fontSizePreset: "standard",
-          sidebarStyle: "dark-navy",
-        });
-        console.log("[GDCMS] Default system branding configuration seeded.");
       }
+
+      const DEFAULT_TRIAL_USERS = [
+        { id: "student_1", indexNumber: "BC/ITN/25/147", fullName: "Clement Koffie", email: "koffieclement12@gmail.com", role: "student" },
+        { id: "student_2", indexNumber: "BC/ITN/25/112", fullName: "Sarah Jenkins", email: "sarah.j@student.edu", role: "student" },
+        { id: "student_3", indexNumber: "BC/ITN/25/115", fullName: "Alex Rivera", email: "alex.r@student.edu", role: "student" },
+        { id: "student_4", indexNumber: "BC/ITN/25/119", fullName: "Jordan Vance", email: "jordan.v@student.edu", role: "student" },
+        { id: "student_5", indexNumber: "BC/ITN/25/122", fullName: "Taylor Swift", email: "taylor.s@student.edu", role: "student" },
+        { id: "student_6", indexNumber: "BC/ITN/25/133", fullName: "Daniel Craig", email: "daniel.c@student.edu", role: "student" },
+        { id: "student_7", indexNumber: "BC/ITN/25/154", fullName: "Elena Rostova", email: "elena.r@student.edu", role: "student" },
+        { id: "student_8", indexNumber: "BC/ITN/25/177", fullName: "Fatima Al-Sayed", email: "fatima.as@student.edu", role: "student" },
+        { id: "student_9", indexNumber: "BC/ITN/25/188", fullName: "Marcus Aurelius", email: "marcus.a@student.edu", role: "student" },
+        { id: "student_10", indexNumber: "BC/ITN/25/199", fullName: "Zoe Kravitz", email: "zoe.k@student.edu", role: "student" },
+        { id: "lecturer_1", indexNumber: "L-9001", fullName: "Dr. Emmanuel Vance", email: "emmanuel.vance@gdcms.edu", role: "lecturer", oauthConnected: true },
+        { id: "lecturer_2", indexNumber: "L-9002", fullName: "Prof. Alan Turing", email: "alan.turing@gdcms.edu", role: "lecturer" },
+        { id: "lecturer_3", indexNumber: "L-9003", fullName: "Dr. Grace Hopper", email: "grace.hopper@gdcms.edu", role: "lecturer" },
+        { id: "admin_1", indexNumber: "A-0001", fullName: "Admin Coordinator", email: "admin@gdcms.edu", role: "admin" },
+        { id: "admin_2", indexNumber: "A-0002", fullName: "Secondary Admin Coordinator", email: "admin2@gdcms.edu", role: "admin" }
+      ];
+
+      const DEFAULT_COURSES = [
+        { id: "course_1", code: "CS-101", name: "Introduction to Computer Science", lecturerId: "lecturer_1", description: "Fundamental concepts of programming and computer architecture." },
+        { id: "course_2", code: "CS-302", name: "Theory of Computation", lecturerId: "lecturer_2", description: "Automata theory, formal languages, turing machines, and computability." },
+        { id: "course_3", code: "CS-405", name: "Advanced Compiler Design", lecturerId: "lecturer_3", description: "Lexical analysis, parsing, code generation, and optimization techniques." }
+      ];
+
+      const DEFAULT_MATERIALS = [
+        { id: "mat_1", courseId: "course_1", title: "CS-101 Course Syllabus", description: "Comprehensive syllabus, grading system, and outline.", type: "outline", uploadedBy: "lecturer_1", uploadedAt: new Date().toISOString(), fileKey: "syllabus.pdf", originalName: "CS101_Syllabus.pdf", mimeType: "application/pdf", fileSize: 125000 },
+        { id: "mat_2", courseId: "course_1", title: "Assignment 1: Logic Gates", description: "Design a 4-bit adder using logic gates and write a report.", type: "assignment_prompt", uploadedBy: "lecturer_1", uploadedAt: new Date().toISOString(), fileKey: "assign1.pdf", originalName: "Assignment_1_Logic_Gates.pdf", mimeType: "application/pdf", fileSize: 185000, deadline: "2026-08-30T23:59:00.000Z" },
+        { id: "mat_3", courseId: "course_2", title: "Lecture Notes: Finite Automata", description: "Detailed notes on DFA, NFA, and conversion techniques.", type: "lecture_notes", uploadedBy: "lecturer_2", uploadedAt: new Date().toISOString(), fileKey: "fa_notes.pdf", originalName: "Finite_Automata_Lectures.pdf", mimeType: "application/pdf", fileSize: 420000 }
+      ];
+
+      const usersToSeed = (parsed.users && parsed.users.length > 0) ? parsed.users : DEFAULT_TRIAL_USERS;
+      const coursesToSeed = (parsed.courses && parsed.courses.length > 0) ? parsed.courses : DEFAULT_COURSES;
+      const materialsToSeed = (parsed.materials && parsed.materials.length > 0) ? parsed.materials : DEFAULT_MATERIALS;
+      const submissionsToSeed = (parsed.submissions && parsed.submissions.length > 0) ? parsed.submissions : [];
+      const notesToSeed = (parsed.notes && parsed.notes.length > 0) ? parsed.notes : [];
+      const notificationsToSeed = (parsed.notifications && parsed.notifications.length > 0) ? parsed.notifications : [];
+      const logsToSeed = (parsed.logs && parsed.logs.length > 0) ? parsed.logs : [];
+      const configToSeed = parsed.appConfig || {
+        systemName: "Group D Class Management System",
+        systemShort: "GDCMS",
+        assignmentsTerm: "Assignments",
+        materialsTerm: "Course Materials",
+        themeColor: "indigo",
+        fontSizePreset: "standard",
+        sidebarStyle: "dark-navy"
+      };
+
+      const expectedHash = crypto.createHash("sha256").update("123456").digest("hex");
+
+      // Seed Users
+      await db.insert(schema.users).values(usersToSeed.map((u: any) => ({
+        id: u.id,
+        indexNumber: u.indexNumber || null,
+        fullName: u.fullName,
+        email: u.email,
+        role: u.role,
+        passwordHash: u.passwordHash || expectedHash,
+        oauthConnected: u.oauthConnected || false,
+        needsPasswordChange: u.needsPasswordChange || false,
+      })));
+
+      // Seed Courses
+      if (coursesToSeed.length > 0) {
+        await db.insert(schema.courses).values(coursesToSeed.map((c: any) => ({
+          id: c.id,
+          code: c.code,
+          name: c.name,
+          lecturerId: c.lecturerId,
+          description: c.description,
+          outlineUrl: c.outlineUrl || null,
+          outlineName: c.outlineName || null,
+        })));
+      }
+
+      // Seed Materials
+      if (materialsToSeed.length > 0) {
+        await db.insert(schema.materials).values(materialsToSeed.map((m: any) => ({
+          id: m.id,
+          courseId: m.courseId,
+          title: m.title,
+          description: m.description,
+          type: m.type,
+          uploadedBy: m.uploadedBy,
+          uploadedAt: m.uploadedAt,
+          fileKey: m.fileKey,
+          originalName: m.originalName,
+          mimeType: m.mimeType,
+          fileSize: m.fileSize,
+          deadline: m.deadline || null,
+        })));
+      }
+
+      // Seed Submissions
+      if (submissionsToSeed.length > 0) {
+        await db.insert(schema.submissions).values(submissionsToSeed.map((s: any) => ({
+          id: s.id,
+          assignmentId: s.assignmentId,
+          studentId: s.studentId,
+          studentIndex: s.studentIndex,
+          studentName: s.studentName,
+          fileKey: s.fileKey,
+          originalName: s.originalName,
+          uploadedAt: s.uploadedAt,
+          grade: s.grade || null,
+          feedback: s.feedback || null,
+          gradedBy: s.gradedBy || null,
+          gradedAt: s.gradedAt || null,
+          status: s.status,
+        })));
+      }
+
+      // Seed Notes
+      if (notesToSeed.length > 0) {
+        await db.insert(schema.notes).values(notesToSeed.map((n: any) => ({
+          id: n.id,
+          studentId: n.studentId,
+          title: n.title,
+          content: n.content.includes(":") ? n.content : encryptText(n.content),
+          updatedAt: n.updatedAt,
+          isSynced: n.isSynced ?? true,
+          tag: n.tag || null,
+        })));
+      }
+
+      // Seed Notifications
+      if (notificationsToSeed.length > 0) {
+        await db.insert(schema.notifications).values(notificationsToSeed.map((n: any) => ({
+          id: n.id,
+          userId: n.userId,
+          title: n.title,
+          message: n.message,
+          type: n.type,
+          createdAt: n.createdAt,
+          isRead: n.isRead || false,
+        })));
+      }
+
+      // Seed Logs
+      if (logsToSeed.length > 0) {
+        await db.insert(schema.logs).values(logsToSeed.map((l: any) => ({
+          id: l.id,
+          timestamp: l.timestamp,
+          emailOrIndex: l.emailOrIndex,
+          status: l.status,
+          reason: l.reason || null,
+          userAgent: l.userAgent || null,
+          ipPlaceholder: l.ipPlaceholder || null,
+        })));
+      }
+
+      // Seed AppConfig
+      await db.insert(schema.appConfig).values({
+        id: "config",
+        systemName: configToSeed.systemName,
+        systemShort: configToSeed.systemShort,
+        assignmentsTerm: configToSeed.assignmentsTerm,
+        materialsTerm: configToSeed.materialsTerm,
+        themeColor: configToSeed.themeColor,
+        fontSizePreset: configToSeed.fontSizePreset,
+        sidebarStyle: configToSeed.sidebarStyle,
+      });
+
+      console.log("[GDCMS] PostgreSQL seeding complete!");
+
+      // Update the DB_FILE immediately with the newly populated state so it persists
+      const initialJsonState = {
+        users: usersToSeed,
+        courses: coursesToSeed,
+        materials: materialsToSeed,
+        submissions: submissionsToSeed,
+        notes: notesToSeed,
+        notifications: notificationsToSeed,
+        logs: logsToSeed,
+        appConfig: configToSeed
+      };
+      fs.writeFileSync(DB_FILE, JSON.stringify(initialJsonState, null, 2), "utf8");
+      console.log("[GDCMS] Synchronous seed recovery flushed to src/db.json successfully!");
     }
-  } catch (err) {
-    console.error("[GDCMS] Graceful database seeding check/run failed:", err);
+  } catch (err: any) {
+    console.error("[GDCMS] Graceful database seeding check/run failed:", err.message);
   }
 }
 
@@ -664,6 +727,57 @@ app.get("/api/materials", authGuard, async (req, res) => {
     res.json(allMaterials);
   } catch (err: any) {
     res.status(500).json({ error: "Database error fetching materials: " + err.message });
+  }
+});
+
+// Create/Import course material or syllabus assignment prompt from external sources (e.g., Google Classroom)
+app.post("/api/materials", authGuard, async (req, res) => {
+  const user = (req as any).user;
+  if (user.role !== "lecturer" && user.role !== "admin") {
+    return res.status(403).json({ error: "Only lecturers and administrators are authorized to import materials." });
+  }
+
+  const { id, courseId, title, description, type, uploadedBy, uploadedAt, fileKey, originalName, mimeType, fileSize, deadline } = req.body;
+
+  if (!courseId || !title || !type) {
+    return res.status(400).json({ error: "Missing required material configuration fields." });
+  }
+
+  try {
+    const generatedId = id || "mat_" + crypto.randomUUID();
+    const createdTime = uploadedAt || new Date().toISOString();
+
+    await db.insert(schema.materials).values({
+      id: generatedId,
+      courseId,
+      title,
+      description: description || "",
+      type,
+      uploadedBy: uploadedBy || user.fullName,
+      uploadedAt: createdTime,
+      fileKey: fileKey || "imported_prompt.txt",
+      originalName: originalName || "Google Classroom Link",
+      mimeType: mimeType || "text/plain",
+      fileSize: fileSize || 100,
+      deadline: deadline || null,
+    });
+
+    // Send a real-time notification to all students
+    const course = (await db.select().from(schema.courses).where(eq(schema.courses.id, courseId)))[0];
+    await db.insert(schema.notifications).values({
+      id: "notif_" + crypto.randomUUID(),
+      userId: "all",
+      title: "New Material Synced 📚",
+      message: `${user.fullName} imported "${title}" for ${course?.code || "Course"} from Google Classroom.`,
+      type: "material",
+      createdAt: new Date().toISOString(),
+      isRead: false,
+    });
+
+    res.status(201).json({ message: "Material imported successfully.", material: { id: generatedId, courseId, title } });
+  } catch (err: any) {
+    console.error("Failed to import coursework to GDCMS database:", err);
+    res.status(500).json({ error: "Database error importing coursework: " + err.message });
   }
 });
 

@@ -1465,6 +1465,39 @@ export default function App() {
     }
   };
 
+  // Mark Assignment Completed from Calendar
+  const handleMarkAsSubmitted = async (asgId: string) => {
+    if (!token) return;
+    const confirmMark = window.confirm("Mark this assignment as submitted? This will update your syllabus completion status.");
+    if (!confirmMark) return;
+
+    try {
+      const res = await fetch("/api/submissions/upload", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          assignmentId: asgId,
+          fileName: "marked_as_submitted.txt",
+          fileData: "TWFya2VkIGFzIHN1Ym1pdHRlZCBvbiBjYWxlbmRhci4=",
+          mimeType: "text/plain"
+        })
+      });
+
+      const result = await res.json();
+      if (res.ok) {
+        fetchAppData(token);
+        alert("Success: Assignment marked as submitted.");
+      } else {
+        alert(result.error || "Failed to mark as submitted.");
+      }
+    } catch (err) {
+      alert("Error marking assignment as completed.");
+    }
+  };
+
   // Grade Assessment (Lecturer Activity)
   const handleGradeSubmission = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -4077,13 +4110,13 @@ export default function App() {
                           <span className="text-slate-700 font-black">Asymmetrical Real-time Mirror</span>
                         </div>
                         <div className="flex items-center justify-between py-1 border-b border-slate-50">
-                          <span className="text-slate-400 font-bold">Firestore Project ID</span>
-                          <span className="text-slate-700 font-mono font-bold">gen-lang-client-0772636231</span>
+                          <span className="text-slate-400 font-bold">Cloud Datastore ID</span>
+                          <span className="text-slate-700 font-mono font-bold">gdcms-prod-core-01</span>
                         </div>
                         <div className="flex items-center justify-between py-1 border-b border-slate-50">
-                          <span className="text-slate-400 font-bold">Instance DB ID</span>
-                          <span className="text-[11px] text-slate-600 font-mono font-bold select-all overflow-hidden text-ellipsis max-w-[200px]" title="ai-studio-9dca88f8-c6b3-4177-b603-77363bb50f89">
-                            ai-studio-9dca88f8-c6b3-4177...
+                          <span className="text-slate-400 font-bold">Active Store ID</span>
+                          <span className="text-[11px] text-slate-600 font-mono font-bold select-all overflow-hidden text-ellipsis max-w-[200px]" title="gdcms-secure-datastore-prod">
+                            gdcms-secure-datastore-prod
                           </span>
                         </div>
                         <div className="flex items-center justify-between py-1 border-b border-slate-50">
@@ -4698,6 +4731,8 @@ export default function App() {
               <div className="pointer-events-auto">
                 <DeadlineCalendar 
                   materials={materials} 
+                  submissions={submissions}
+                  onMarkAsSubmitted={handleMarkAsSubmitted}
                   googleToken={googleToken}
                   onConnectGoogle={handleConnectGoogle}
                   onSelectAssignment={(asgId) => {
