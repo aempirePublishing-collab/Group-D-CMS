@@ -4404,10 +4404,10 @@ div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#wel
 }
 
 #welcome-hero-title-accent {
-  font-family: Arial;
+  font-family: inherit;
   font-style: normal;
   text-decoration-line: none;
-  font-size: 45px;
+  font-size: clamp(1.8rem, 5vw, 2.8rem);
 }
 
 #welcome-logo-subtitle-span {
@@ -4566,8 +4566,21 @@ div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#wel
   border-radius: 0px;
   margin-bottom: 28px;
   margin-top: 3px;
-  margin-left: 59px;
-  margin-right: 60px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1rem;
+  padding-right: 1rem;
+  max-width: 90%;
+}
+
+@media (min-width: 768px) {
+  div#root:nth-of-type(1) > div:nth-of-type(1) > main:nth-of-type(1) > section#welcome-hero-section:nth-of-type(1) > div:nth-of-type(1) > h1#welcome-hero-title:nth-of-type(1) {
+    margin-left: 59px;
+    margin-right: 60px;
+    padding-left: 0;
+    padding-right: 0;
+    max-width: none;
+  }
 }
 
 div#root:nth-of-type(1) > div:nth-of-type(1) > header:nth-of-type(1) {
@@ -4588,6 +4601,16 @@ div#root:nth-of-type(1) > div:nth-of-type(1) > header:nth-of-type(1) > nav:nth-o
 
 .dark div#root:nth-of-type(1) > div:nth-of-type(1) > header:nth-of-type(1) > nav:nth-of-type(1) > button#welcome-nav-modules-btn:nth-of-type(2) {
   color: #f1f5f9; /* slate-100 */
+}
+
+/* Hide scrollbar for Chrome, Safari and Opera */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+/* Hide scrollbar for IE, Edge and Firefox */
+.no-scrollbar {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
 }
 
 

@@ -43,7 +43,8 @@ import {
   School,
   Pin,
   ExternalLink,
-  Check
+  Check,
+  Globe
 } from "lucide-react";
 import { useGlobalTheme } from "./ThemeContext";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as ChartTooltip, Legend } from "recharts";
@@ -230,6 +231,24 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<"student" | "lecturer" | "admin">("student");
+
+  // Class Systems & Multi-tenant state variables
+  const [classSystems, setClassSystems] = useState<any[]>([]);
+  const [selectedSystemId, setSelectedSystemId] = useState<string>("config");
+  const [adminRegisterSystemId, setAdminRegisterSystemId] = useState<string>("config");
+
+  // Form Inputs: Admin New Class System creation
+  const [adminSystemId, setAdminSystemId] = useState("");
+  const [adminSystemName, setAdminSystemName] = useState("");
+  const [adminSystemShort, setAdminSystemShort] = useState("");
+  const [adminIndexValidation, setAdminIndexValidation] = useState("^[A-Za-z]{2}/[A-Za-z]{3}/\\d{2}/\\d{3}$");
+  const [adminAssignmentsTerm, setAdminAssignmentsTerm] = useState("Assignments");
+  const [adminMaterialsTerm, setAdminMaterialsTerm] = useState("Course Materials");
+  const [adminThemeColor, setAdminThemeColor] = useState("indigo");
+  const [adminSidebarStyle, setAdminSidebarStyle] = useState("dark-navy");
+  const [isCreatingSystem, setIsCreatingSystem] = useState(false);
+  const [createSystemError, setCreateSystemError] = useState<string | null>(null);
+  const [createSystemSuccess, setCreateSystemSuccess] = useState<string | null>(null);
 
   // Core App Data Collections
   const [courses, setCourses] = useState<Course[]>([]);
@@ -569,13 +588,27 @@ export default function App() {
     }
   };
 
+  // Fetch available systems / cohorts
+  const fetchClassSystems = async () => {
+    try {
+      const res = await fetch("/api/systems");
+      if (res.ok) {
+        const data = await res.json();
+        setClassSystems(data);
+      }
+    } catch (e) {
+      console.error("Failed to load systems list:", e);
+    }
+  };
+
   // Load from local storage or cloud server config on startup with connection retry policy
-  const fetchGlobalConfigOnStartup = async () => {
+  const fetchGlobalConfigOnStartup = async (customSystemId?: string) => {
     let attempts = 3;
     let delay = 800;
+    const targetId = customSystemId || (currentUser?.systemId) || "config";
     while (attempts > 0) {
       try {
-        const res = await fetch("/api/app-config");
+        const res = await fetch(`/api/app-config?systemId=${targetId}`);
         if (res.ok) {
           const data = await res.json();
           if (data && data.systemName) {
@@ -604,6 +637,7 @@ export default function App() {
 
   useEffect(() => {
     fetchGlobalConfigOnStartup();
+    fetchClassSystems();
   }, []);
 
   useEffect(() => {
@@ -769,7 +803,8 @@ export default function App() {
           email: adminRegisterEmail,
           password: adminRegisterPassword,
           role: adminRegisterRole,
-          indexNumber: adminRegisterRole === "student" ? adminRegisterIndexNumber : undefined
+          indexNumber: adminRegisterRole === "student" ? adminRegisterIndexNumber : undefined,
+          systemId: adminRegisterSystemId
         })
       });
 
@@ -789,6 +824,62 @@ export default function App() {
       setAdminRegisterError("Internal server response failure. Check connection.");
     } finally {
       setIsAdminRegisteringUser(false);
+    }
+  };
+
+  const handleCreateClassSystem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreateSystemError(null);
+    setCreateSystemSuccess(null);
+    setIsCreatingSystem(true);
+
+    if (!adminSystemId || !adminSystemName || !adminSystemShort) {
+      setCreateSystemError("Class System ID, Name, and Short Acronym are required.");
+      setIsCreatingSystem(false);
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/admin/systems", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          id: adminSystemId.trim().toLowerCase(),
+          systemName: adminSystemName.trim(),
+          systemShort: adminSystemShort.trim().toUpperCase(),
+          assignmentsTerm: adminAssignmentsTerm.trim(),
+          materialsTerm: adminMaterialsTerm.trim(),
+          themeColor: adminThemeColor,
+          sidebarStyle: adminSidebarStyle,
+          fontSizePreset: "standard",
+          indexValidation: adminIndexValidation.trim()
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setCreateSystemSuccess(`Class System '${adminSystemName}' registered successfully.`);
+        // Refresh systems list
+        fetchClassSystems();
+        // Reset state fields
+        setAdminSystemId("");
+        setAdminSystemName("");
+        setAdminSystemShort("");
+        setAdminIndexValidation("^[A-Za-z]{2}/[A-Za-z]{3}/\\d{2}/\\d{3}$");
+        setAdminAssignmentsTerm("Assignments");
+        setAdminMaterialsTerm("Course Materials");
+        setAdminThemeColor("indigo");
+        setAdminSidebarStyle("dark-navy");
+      } else {
+        setCreateSystemError(data.error || "Failed to create class system.");
+      }
+    } catch (err) {
+      setCreateSystemError("Network error occurred while trying to register class system.");
+    } finally {
+      setIsCreatingSystem(false);
     }
   };
 
@@ -1091,6 +1182,7 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setCurrentUser(data);
+        fetchGlobalConfigOnStartup(data.systemId);
         fetchAppData(token!, data);
       } else {
         // Clear expired tokens
@@ -1258,6 +1350,9 @@ export default function App() {
       }
 
       setToken(data.token);
+      if (data.user && data.user.systemId) {
+        fetchGlobalConfigOnStartup(data.user.systemId);
+      }
       setActiveTab("dashboard");
       setIndexNumber("");
       setPassword("");
@@ -1292,7 +1387,8 @@ export default function App() {
           fullName,
           email,
           password,
-          role
+          role,
+          systemId: selectedSystemId
         })
       });
 
@@ -1303,6 +1399,7 @@ export default function App() {
       }
 
       setToken(data.token);
+      fetchGlobalConfigOnStartup(selectedSystemId);
       setActiveTab("dashboard");
       setIndexNumber("");
       setPassword("");
@@ -2099,6 +2196,23 @@ export default function App() {
 
                 {authView === "register" && (
                   <>
+                    {classSystems.length > 0 && (
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-500 mb-1.5">Select Class System / Cohort</label>
+                        <select
+                          value={selectedSystemId}
+                          onChange={(e) => setSelectedSystemId(e.target.value)}
+                          className="w-full bg-[#fcfdfe] border border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none rounded-xl py-3 px-4 text-xs font-semibold text-slate-800 transition-all shadow-sm"
+                        >
+                          {classSystems.map((sys) => (
+                            <option key={sys.id} value={sys.id}>
+                              {sys.systemName} ({sys.systemShort})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
                     {/* Full Name */}
                     <div>
                       <label className="block text-[11px] font-bold text-slate-500 mb-1.5">Full Name</label>
@@ -3307,6 +3421,17 @@ export default function App() {
                     </button>
                     <button
                       type="button"
+                      onClick={() => setAdminPanelTab("classSystems")}
+                      className={`px-5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                        adminPanelTab === "classSystems"
+                          ? "bg-white text-indigo-700 font-bold border border-indigo-200 shadow-sm"
+                          : "text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      Class Systems Manager 🌐
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setAdminPanelTab("sandbox")}
                       className={`px-5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
                         adminPanelTab === "sandbox"
@@ -3721,6 +3846,26 @@ export default function App() {
                       <p><strong>Admin Rules:</strong> Creates an administrative user with complete oversight on databases, rebranding matrixes and system control setups.</p>
                     )}
                   </div>
+
+                  {/* Class System Dropdown assignment */}
+                  {classSystems.length > 0 && (
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-500">
+                        Class System Portal Assignment
+                      </label>
+                      <select
+                        value={adminRegisterSystemId}
+                        onChange={(e) => setAdminRegisterSystemId(e.target.value)}
+                        className="w-full bg-[#fcfdfe] border border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none rounded-xl py-3 px-4 text-xs font-semibold text-slate-800 transition-all shadow-sm"
+                      >
+                        {classSystems.map((sys) => (
+                          <option key={sys.id} value={sys.id}>
+                            {sys.systemName} ({sys.systemShort})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   {/* Full name input */}
                   <div className="space-y-1.5">
@@ -4223,6 +4368,272 @@ export default function App() {
                       </div>
                     </div>
                   </div>
+                </div>
+
+              </div>
+            )}
+
+            {adminPanelTab === "classSystems" && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start text-left animate-fade-in">
+                
+                {/* Form to Register a New Class System */}
+                <div className="bg-white border border-slate-200 rounded-3xl p-6 md:p-8 shadow-sm space-y-6">
+                  <div>
+                    <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-xl font-black uppercase tracking-wider">
+                      System Orchestration
+                    </span>
+                    <h3 className="text-lg font-black text-slate-900 mt-1.5 flex items-center gap-2">
+                      <Globe className="w-5 h-5 text-indigo-600 animate-pulse" />
+                      <span>Instantiate New Class System</span>
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                      Create an isolated class system/cohort workspace with custom theme branding, custom nomenclatures, and dedicated input regex validation formats.
+                    </p>
+                  </div>
+
+                  {createSystemError && (
+                    <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-bold flex items-start gap-2">
+                      <span>✖</span>
+                      <span>{createSystemError}</span>
+                    </div>
+                  )}
+
+                  {createSystemSuccess && (
+                    <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs rounded-xl font-bold flex items-start gap-2">
+                      <span>✔</span>
+                      <span>{createSystemSuccess}</span>
+                    </div>
+                  )}
+
+                  <form onSubmit={handleCreateClassSystem} className="space-y-4">
+                    
+                    {/* System Unique ID slug */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-bold text-slate-500">
+                          System ID / Slug
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={adminSystemId}
+                          onChange={(e) => setAdminSystemId(e.target.value.toLowerCase().replace(/\s+/g, "-"))}
+                          placeholder="e.g. cohort-a"
+                          className="w-full bg-[#fcfdfe] border border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none rounded-xl py-3 px-4 text-xs font-semibold text-slate-800 placeholder:text-slate-400 transition-all shadow-sm"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-bold text-slate-500">
+                          Short Acronym Name
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={adminSystemShort}
+                          onChange={(e) => setAdminSystemShort(e.target.value.toUpperCase())}
+                          placeholder="e.g. GACMS"
+                          className="w-full bg-[#fcfdfe] border border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none rounded-xl py-3 px-4 text-xs font-semibold text-slate-800 placeholder:text-slate-400 transition-all shadow-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* System Full Name */}
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-500">
+                        Class System Full Branding Title
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={adminSystemName}
+                        onChange={(e) => setAdminSystemName(e.target.value)}
+                        placeholder="e.g. Group A Class Management System"
+                        className="w-full bg-[#fcfdfe] border border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none rounded-xl py-3 px-4 text-xs font-semibold text-slate-800 placeholder:text-slate-400 transition-all shadow-sm"
+                      />
+                    </div>
+
+                    {/* Custom Index Validation Regex Pattern */}
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-500">
+                        Index Number Format Validation Pattern (Regex)
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={adminIndexValidation}
+                        onChange={(e) => setAdminIndexValidation(e.target.value)}
+                        placeholder="e.g. ^[A-Za-z]{2}/[A-Za-z]{3}/\d{2}/\d{3}$"
+                        className="w-full bg-[#fcfdfe] border border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none rounded-xl py-3 px-4 text-xs font-semibold text-slate-800 placeholder:text-slate-400 transition-all shadow-sm font-mono"
+                      />
+                      <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">
+                        Enforces index format compliance before user registration is permitted. Default allows structures like <code>BC/ITN/25/147</code>.
+                      </p>
+                    </div>
+
+                    {/* Nomenclatures */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-bold text-slate-500">
+                          Assignments Nomenclature
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={adminAssignmentsTerm}
+                          onChange={(e) => setAdminAssignmentsTerm(e.target.value)}
+                          placeholder="e.g. Assignments"
+                          className="w-full bg-[#fcfdfe] border border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none rounded-xl py-3 px-4 text-xs font-semibold text-slate-800 placeholder:text-slate-400 transition-all shadow-sm"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-bold text-slate-500">
+                          Materials Nomenclature
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={adminMaterialsTerm}
+                          onChange={(e) => setAdminMaterialsTerm(e.target.value)}
+                          placeholder="e.g. Course Materials"
+                          className="w-full bg-[#fcfdfe] border border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none rounded-xl py-3 px-4 text-xs font-semibold text-slate-800 placeholder:text-slate-400 transition-all shadow-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Styling Settings */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-bold text-slate-500">
+                          Theme Accent Color
+                        </label>
+                        <select
+                          value={adminThemeColor}
+                          onChange={(e) => setAdminThemeColor(e.target.value)}
+                          className="w-full bg-[#fcfdfe] border border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none rounded-xl py-3 px-4 text-xs font-semibold text-slate-800 transition-all shadow-sm"
+                        >
+                          <option value="indigo">Indigo Depth</option>
+                          <option value="blue">Sapphire Blue</option>
+                          <option value="emerald">Emerald Forest</option>
+                          <option value="rose">Warm Rose</option>
+                          <option value="violet">Royal Violet</option>
+                          <option value="amber">Warm Amber</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-bold text-slate-500">
+                          Sidebar Rail Theme
+                        </label>
+                        <select
+                          value={adminSidebarStyle}
+                          onChange={(e) => setAdminSidebarStyle(e.target.value)}
+                          className="w-full bg-[#fcfdfe] border border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none rounded-xl py-3 px-4 text-xs font-semibold text-slate-800 transition-all shadow-sm"
+                        >
+                          <option value="dark-navy">Dark Navy (Classic)</option>
+                          <option value="slate-minimal">Slate Minimal (Clean)</option>
+                          <option value="indigo-accent">Indigo Accent (Vibrant)</option>
+                          <option value="emerald-forest">Emerald Forest (Nature)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Submit Button */}
+                    <button
+                      type="submit"
+                      disabled={isCreatingSystem}
+                      className="w-full py-3 px-4 rounded-xl font-bold text-xs text-white bg-indigo-600 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 mt-2"
+                    >
+                      {isCreatingSystem ? "Instantiating Class..." : "Instantiate Class Portal ✔️"}
+                    </button>
+
+                  </form>
+                </div>
+
+                {/* List of Registered Systems */}
+                <div className="bg-white border border-slate-200 rounded-3xl p-6 md:p-8 shadow-sm space-y-6">
+                  <div>
+                    <span className="text-[10px] bg-slate-100 text-slate-700 px-2.5 py-1 rounded-xl font-black uppercase tracking-wider">
+                      active catalog
+                    </span>
+                    <h3 className="text-lg font-black text-slate-900 mt-1.5 flex items-center gap-2">
+                      <Layers className="w-5 h-5 text-slate-500" />
+                      <span>Registered Class Systems ({classSystems.length})</span>
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                      Below are the class cohorts active in this environment database. You can instantly toggle the current administrator panel branding and labels to any class.
+                    </p>
+                  </div>
+
+                  <div className="space-y-4 max-h-[500px] overflow-y-auto no-scrollbar pr-1">
+                    {classSystems.map((sys) => {
+                      const isActive = appConfig.id === sys.id;
+                      return (
+                        <div
+                          key={sys.id}
+                          className={`p-4 rounded-2xl border transition-all text-left flex flex-col justify-between gap-3 ${
+                            isActive
+                              ? "bg-slate-50 border-slate-300 shadow-sm"
+                              : "border-slate-150 bg-white hover:border-slate-300"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-black px-2.5 py-0.5 rounded-full uppercase bg-slate-100 text-slate-800 border border-slate-200">
+                                {sys.systemShort}
+                              </span>
+                              <span className="text-[10px] font-mono font-bold text-slate-400">
+                                id: {sys.id}
+                              </span>
+                            </div>
+                            {isActive && (
+                              <span className="bg-emerald-50 text-emerald-700 text-[9px] font-black tracking-wider uppercase border border-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                Currently Applied
+                              </span>
+                            )}
+                          </div>
+
+                          <div>
+                            <h4 className="text-sm font-black text-slate-900">{sys.systemName}</h4>
+                            <div className="grid grid-cols-2 gap-2 mt-2 text-[10px] text-slate-500 font-semibold">
+                              <p>🏷️ assignments: <span className="font-bold text-slate-800">{sys.assignmentsTerm}</span></p>
+                              <p>📚 materials: <span className="font-bold text-slate-800">{sys.materialsTerm}</span></p>
+                              <p>🎨 accent: <span className="font-bold text-slate-800">{sys.themeColor}</span></p>
+                              <p>🧭 rail: <span className="font-bold text-slate-800">{sys.sidebarStyle}</span></p>
+                            </div>
+                            <p className="text-[10px] font-mono text-slate-400 mt-2 bg-slate-50 p-2 rounded-lg border border-slate-150 overflow-x-auto no-scrollbar">
+                              pattern: {sys.indexValidation}
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-2 mt-1">
+                            <button
+                              type="button"
+                              onClick={() => fetchGlobalConfigOnStartup(sys.id)}
+                              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-[10px] font-bold rounded-lg text-slate-800 transition-all cursor-pointer"
+                            >
+                              Apply Brand 🎨
+                            </button>
+                            
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAdminRegisterSystemId(sys.id);
+                                setAdminPanelTab("addUser");
+                              }}
+                              className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-[10px] font-bold rounded-lg text-indigo-700 transition-all cursor-pointer"
+                            >
+                              Add Users Here 👤
+                            </button>
+                          </div>
+
+                        </div>
+                      );
+                    })}
+                  </div>
+
                 </div>
 
               </div>

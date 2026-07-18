@@ -46,29 +46,60 @@ export const createPool = () => {
     const hasSqlConfig = !!process.env.SQL_HOST;
 
     if (hasSqlConfig) {
-      try {
-        console.log("[GDCMS] Testing connection to Cloud SQL database...");
-        const realPool = new Pool({
-          host: process.env.SQL_HOST,
-          user: process.env.SQL_USER,
-          password: process.env.SQL_PASSWORD,
-          database: process.env.SQL_DB_NAME,
-          connectionTimeoutMillis: 2000, // Fast timeout for detection
-        });
+      const host = process.env.SQL_HOST;
+      const user = process.env.SQL_USER;
+      const database = process.env.SQL_DB_NAME;
+      const port = process.env.SQL_PORT ? parseInt(process.env.SQL_PORT) : 5432;
 
+      try {
+        console.log(`[GDCMS] Testing connection to Cloud SQL database (host: ${host}, user: ${user}, database: ${database}, port: ${port})...`);
+        
+        const poolConfig: pg.PoolConfig = {
+          host,
+          user,
+          password: process.env.SQL_PASSWORD,
+          database,
+          port,
+          connectionTimeoutMillis: 4000,
+        };
+
+        // Standard Cloud SQL setup often requires SSL (using rejectUnauthorized: false for secure container proxying)
+        if (host && !host.startsWith("/")) {
+          poolConfig.ssl = { rejectUnauthorized: false };
+        }
+
+        const realPool = new Pool(poolConfig);
         const client = await realPool.connect();
         console.log("[GDCMS] Successfully connected to Cloud SQL database!");
         client.release();
         poolInstance = realPool;
         return;
       } catch (err: any) {
-        console.warn("[GDCMS] Cloud SQL connection failed:", err.message);
+        console.log(`[GDCMS] Cloud SQL connection with SSL was not available, trying without SSL...`);
+        
+        try {
+          const realPool = new Pool({
+            host,
+            user,
+            password: process.env.SQL_PASSWORD,
+            database,
+            port,
+            connectionTimeoutMillis: 4000,
+          });
+          const client = await realPool.connect();
+          console.log("[GDCMS] Successfully connected to Cloud SQL database without SSL!");
+          client.release();
+          poolInstance = realPool;
+          return;
+        } catch (retryErr: any) {
+          console.log(`[GDCMS] Note: Cloud SQL database is offline or unreachable at this time.`);
+        }
       }
     } else {
-      console.warn("[GDCMS] No SQL_HOST specified in environment variables.");
+      console.log("[GDCMS] No SQL_HOST specified in environment variables.");
     }
 
-    console.warn("[GDCMS] Initializing self-healing in-memory PostgreSQL emulation (pg-mem) fallback...");
+    console.log("[GDCMS] Initializing self-healing in-memory PostgreSQL emulation (pg-mem) fallback...");
     isInMemory = true;
     memDb = newDb();
     
@@ -166,6 +197,7 @@ function triggerDebouncedSave(pool: any) {
           passwordHash: r.password_hash,
           oauthConnected: r.oauth_connected === true || r.oauth_connected === 'true' || r.oauth_connected === 1,
           needsPasswordChange: r.needs_password_change === true || r.needs_password_change === 'true' || r.needs_password_change === 1,
+          systemId: r.system_id,
         })),
         courses: cRows.map((r: any) => ({
           id: r.id,
@@ -175,6 +207,7 @@ function triggerDebouncedSave(pool: any) {
           description: r.description,
           outlineUrl: r.outline_url,
           outlineName: r.outline_name,
+          systemId: r.system_id,
         })),
         materials: mRows.map((r: any) => ({
           id: r.id,
@@ -240,7 +273,19 @@ function triggerDebouncedSave(pool: any) {
           themeColor: confRows[0].theme_color,
           fontSizePreset: confRows[0].font_size_preset,
           sidebarStyle: confRows[0].sidebar_style,
+          indexValidation: confRows[0].index_validation,
         } : null,
+        appConfigs: confRows.map((r: any) => ({
+          id: r.id,
+          systemName: r.system_name,
+          systemShort: r.system_short,
+          assignmentsTerm: r.assignments_term,
+          materialsTerm: r.materials_term,
+          themeColor: r.theme_color,
+          fontSizePreset: r.font_size_preset,
+          sidebarStyle: r.sidebar_style,
+          indexValidation: r.index_validation,
+        })),
       };
 
       fs.writeFileSync(DB_FILE, JSON.stringify(state, null, 2), "utf8");

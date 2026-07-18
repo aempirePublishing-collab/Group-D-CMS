@@ -117,7 +117,8 @@ async function ensureDatabaseSchema() {
         role TEXT NOT NULL,
         password_hash TEXT,
         oauth_connected BOOLEAN DEFAULT false,
-        needs_password_change BOOLEAN DEFAULT false
+        needs_password_change BOOLEAN DEFAULT false,
+        system_id TEXT
       );
     `);
     
@@ -129,7 +130,8 @@ async function ensureDatabaseSchema() {
         lecturer_id TEXT NOT NULL,
         description TEXT NOT NULL,
         outline_url TEXT,
-        outline_name TEXT
+        outline_name TEXT,
+        system_id TEXT
       );
     `);
 
@@ -213,9 +215,34 @@ async function ensureDatabaseSchema() {
         materials_term TEXT NOT NULL,
         theme_color TEXT NOT NULL,
         font_size_preset TEXT NOT NULL,
-        sidebar_style TEXT NOT NULL
+        sidebar_style TEXT NOT NULL,
+        index_validation TEXT
       );
     `);
+
+    // Self-healing columns: ensure system_id exists in users table
+    try {
+      await db.execute(sql`ALTER TABLE users ADD COLUMN system_id TEXT;`);
+      console.log("[GDCMS] Self-healing: Added system_id column to users table.");
+    } catch (e: any) {
+      // Column may already exist
+    }
+
+    // Self-healing columns: ensure system_id exists in courses table
+    try {
+      await db.execute(sql`ALTER TABLE courses ADD COLUMN system_id TEXT;`);
+      console.log("[GDCMS] Self-healing: Added system_id column to courses table.");
+    } catch (e: any) {
+      // Column may already exist
+    }
+
+    // Self-healing columns: ensure index_validation exists in app_config table
+    try {
+      await db.execute(sql`ALTER TABLE app_config ADD COLUMN index_validation TEXT;`);
+      console.log("[GDCMS] Self-healing: Added index_validation column to app_config table.");
+    } catch (e: any) {
+      // Column may already exist
+    }
 
     console.log("[GDCMS] Database tables verified or created successfully.");
   } catch (error) {
@@ -312,6 +339,7 @@ async function seedDatabaseIfNeeded() {
         passwordHash: u.passwordHash || expectedHash,
         oauthConnected: u.oauthConnected || false,
         needsPasswordChange: u.needsPasswordChange || false,
+        systemId: u.systemId || "config",
       })));
 
       // Seed Courses
@@ -324,6 +352,7 @@ async function seedDatabaseIfNeeded() {
           description: c.description,
           outlineUrl: c.outlineUrl || null,
           outlineName: c.outlineName || null,
+          systemId: c.systemId || "config",
         })));
       }
 
@@ -404,16 +433,33 @@ async function seedDatabaseIfNeeded() {
       }
 
       // Seed AppConfig
-      await db.insert(schema.appConfig).values({
-        id: "config",
-        systemName: configToSeed.systemName,
-        systemShort: configToSeed.systemShort,
-        assignmentsTerm: configToSeed.assignmentsTerm,
-        materialsTerm: configToSeed.materialsTerm,
-        themeColor: configToSeed.themeColor,
-        fontSizePreset: configToSeed.fontSizePreset,
-        sidebarStyle: configToSeed.sidebarStyle,
-      });
+      if (parsed.appConfigs && parsed.appConfigs.length > 0) {
+        for (const sys of parsed.appConfigs) {
+          await db.insert(schema.appConfig).values({
+            id: sys.id,
+            systemName: sys.systemName,
+            systemShort: sys.systemShort,
+            assignmentsTerm: sys.assignmentsTerm || "Assignments",
+            materialsTerm: sys.materialsTerm || "Course Materials",
+            themeColor: sys.themeColor || "indigo",
+            fontSizePreset: sys.fontSizePreset || "standard",
+            sidebarStyle: sys.sidebarStyle || "dark-navy",
+            indexValidation: sys.indexValidation || "^[A-Za-z]{2}/[A-Za-z]{3}/\\d{2}/\\d{3}$"
+          });
+        }
+      } else {
+        await db.insert(schema.appConfig).values({
+          id: "config",
+          systemName: configToSeed.systemName,
+          systemShort: configToSeed.systemShort,
+          assignmentsTerm: configToSeed.assignmentsTerm,
+          materialsTerm: configToSeed.materialsTerm,
+          themeColor: configToSeed.themeColor,
+          fontSizePreset: configToSeed.fontSizePreset,
+          sidebarStyle: configToSeed.sidebarStyle,
+          indexValidation: configToSeed.indexValidation || "^[A-Za-z]{2}/[A-Za-z]{3}/\\d{2}/\\d{3}$"
+        });
+      }
 
       console.log("[GDCMS] PostgreSQL seeding complete!");
 
@@ -426,7 +472,18 @@ async function seedDatabaseIfNeeded() {
         notes: notesToSeed,
         notifications: notificationsToSeed,
         logs: logsToSeed,
-        appConfig: configToSeed
+        appConfig: configToSeed,
+        appConfigs: parsed.appConfigs || [{
+          id: "config",
+          systemName: configToSeed.systemName,
+          systemShort: configToSeed.systemShort,
+          assignmentsTerm: configToSeed.assignmentsTerm,
+          materialsTerm: configToSeed.materialsTerm,
+          themeColor: configToSeed.themeColor,
+          fontSizePreset: configToSeed.fontSizePreset,
+          sidebarStyle: configToSeed.sidebarStyle,
+          indexValidation: configToSeed.indexValidation || "^[A-Za-z]{2}/[A-Za-z]{3}/\\d{2}/\\d{3}$"
+        }]
       };
       fs.writeFileSync(DB_FILE, JSON.stringify(initialJsonState, null, 2), "utf8");
       console.log("[GDCMS] Synchronous seed recovery flushed to src/db.json successfully!");
@@ -488,10 +545,16 @@ app.get("/api/health", (req, res) => {
 
 // Authentication: Registration
 app.post("/api/auth/register", async (req, res) => {
-  const { indexNumber, fullName, email, password, role } = req.body;
+  const { indexNumber, fullName, email, password, role, systemId } = req.body;
+  const activeSystemId = systemId || "config";
 
   if (!fullName || !email || !password || !role) {
     return res.status(400).json({ error: "Missing mandatory registration fields." });
+  }
+
+  // Strong input validation on email
+  if (!email.includes("@") || !email.includes(".")) {
+    return res.status(400).json({ error: "Institutional Email address format is invalid." });
   }
 
   if (role === "student" && !indexNumber) {
@@ -499,6 +562,21 @@ app.post("/api/auth/register", async (req, res) => {
   }
 
   try {
+    // Dynamic index validation rule lookup
+    const systemConfig = (await db.select().from(schema.appConfig).where(eq(schema.appConfig.id, activeSystemId)))[0];
+    if (role === "student" && systemConfig && systemConfig.indexValidation) {
+      try {
+        const regex = new RegExp(systemConfig.indexValidation);
+        if (!regex.test(indexNumber)) {
+          return res.status(400).json({ 
+            error: `Student Index Number is invalid for portal ${systemConfig.systemShort}. Pattern required: ${systemConfig.indexValidation}` 
+          });
+        }
+      } catch (regexErr) {
+        console.error("Regex parsing error during registration:", regexErr);
+      }
+    }
+
     // Check duplication in SQL
     const duplicate = (await db.select().from(schema.users).where(
       or(
@@ -533,6 +611,7 @@ app.post("/api/auth/register", async (req, res) => {
       passwordHash,
       oauthConnected: false,
       needsPasswordChange: false,
+      systemId: activeSystemId,
     });
 
     const sessionToken = crypto.randomBytes(32).toString("hex");
@@ -541,7 +620,7 @@ app.post("/api/auth/register", async (req, res) => {
     res.status(201).json({
       message: "Registration successful",
       token: sessionToken,
-      user: { id: newUser.id, fullName: newUser.fullName, email: newUser.email, role: newUser.role, indexNumber: newUser.indexNumber }
+      user: { id: newUser.id, fullName: newUser.fullName, email: newUser.email, role: newUser.role, indexNumber: newUser.indexNumber, systemId: activeSystemId }
     });
   } catch (err: any) {
     console.error("SQL registration error:", err);
@@ -580,7 +659,7 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(401).json({ error: "Invalid password credentials." });
     }
 
-    const matchedUser: User = {
+    const matchedUser: User & { systemId?: string } = {
       id: userObj.id,
       indexNumber: userObj.indexNumber || undefined,
       fullName: userObj.fullName,
@@ -588,6 +667,7 @@ app.post("/api/auth/login", async (req, res) => {
       role: userObj.role as any,
       oauthConnected: userObj.oauthConnected || false,
       needsPasswordChange: userObj.needsPasswordChange || false,
+      systemId: userObj.systemId || "config",
     };
 
     const sessionToken = crypto.randomBytes(32).toString("hex");
@@ -598,7 +678,7 @@ app.post("/api/auth/login", async (req, res) => {
     res.json({
       message: "Login successful",
       token: sessionToken,
-      user: { id: matchedUser.id, fullName: matchedUser.fullName, email: matchedUser.email, role: matchedUser.role, indexNumber: matchedUser.indexNumber }
+      user: { id: matchedUser.id, fullName: matchedUser.fullName, email: matchedUser.email, role: matchedUser.role, indexNumber: matchedUser.indexNumber, systemId: matchedUser.systemId }
     });
   } catch (err: any) {
     console.error("SQL login error:", err);
@@ -630,6 +710,7 @@ app.post("/api/auth/oauth-sync", async (req, res) => {
         role: assignedRole,
         oauthConnected: true,
         needsPasswordChange: false,
+        systemId: "config",
       });
 
       userObj = {
@@ -641,6 +722,7 @@ app.post("/api/auth/oauth-sync", async (req, res) => {
         oauthConnected: true,
         passwordHash: null,
         needsPasswordChange: false,
+        systemId: "config",
       };
     } else {
       if (!userObj.oauthConnected) {
@@ -696,13 +778,19 @@ app.post("/api/auth/logout", (req, res) => {
 // List active Courses
 app.get("/api/courses", authGuard, async (req, res) => {
   const user = (req as any).user;
+  const userSystemId = user.systemId || "config";
   try {
     if (user.role === "lecturer") {
-      const lecturerCourses = await db.select().from(schema.courses).where(eq(schema.courses.lecturerId, user.id));
+      const lecturerCourses = await db.select().from(schema.courses).where(
+        and(
+          eq(schema.courses.lecturerId, user.id),
+          eq(schema.courses.systemId, userSystemId)
+        )
+      );
       return res.json(lecturerCourses);
     }
-    const allCourses = await db.select().from(schema.courses);
-    res.json(allCourses);
+    const filteredCourses = await db.select().from(schema.courses).where(eq(schema.courses.systemId, userSystemId));
+    res.json(filteredCourses);
   } catch (err: any) {
     res.status(500).json({ error: "Database error fetching courses: " + err.message });
   }
@@ -711,9 +799,15 @@ app.get("/api/courses", authGuard, async (req, res) => {
 // Get Materials List for active Courses
 app.get("/api/materials", authGuard, async (req, res) => {
   const user = (req as any).user;
+  const userSystemId = user.systemId || "config";
   try {
     if (user.role === "lecturer") {
-      const lecturerCourses = await db.select().from(schema.courses).where(eq(schema.courses.lecturerId, user.id));
+      const lecturerCourses = await db.select().from(schema.courses).where(
+        and(
+          eq(schema.courses.lecturerId, user.id),
+          eq(schema.courses.systemId, userSystemId)
+        )
+      );
       const courseIds = lecturerCourses.map(c => c.id);
       if (courseIds.length === 0) {
         return res.json([]);
@@ -723,8 +817,15 @@ app.get("/api/materials", authGuard, async (req, res) => {
       );
       return res.json(lecturerMaterials);
     }
-    const allMaterials = await db.select().from(schema.materials);
-    res.json(allMaterials);
+    const systemCourses = await db.select().from(schema.courses).where(eq(schema.courses.systemId, userSystemId));
+    const courseIds = systemCourses.map(c => c.id);
+    if (courseIds.length === 0) {
+      return res.json([]);
+    }
+    const filteredMaterials = await db.select().from(schema.materials).where(
+      or(...courseIds.map(cid => eq(schema.materials.courseId, cid)))
+    );
+    res.json(filteredMaterials);
   } catch (err: any) {
     res.status(500).json({ error: "Database error fetching materials: " + err.message });
   }
@@ -1604,8 +1705,12 @@ app.get(["/auth/callback", "/auth/callback/"], async (req, res) => {
 // ---------------------------------------------------------
 
 app.get("/api/app-config", async (req, res) => {
+  const targetId = (req.query.systemId as string) || "config";
   try {
-    let config = (await db.select().from(schema.appConfig).where(eq(schema.appConfig.id, "config")))[0];
+    let config = (await db.select().from(schema.appConfig).where(eq(schema.appConfig.id, targetId)))[0];
+    if (!config) {
+      config = (await db.select().from(schema.appConfig).where(eq(schema.appConfig.id, "config")))[0];
+    }
     if (!config) {
       const defaultConfig = {
         id: "config",
@@ -1615,7 +1720,8 @@ app.get("/api/app-config", async (req, res) => {
         materialsTerm: "Course Materials",
         themeColor: "indigo",
         fontSizePreset: "standard",
-        sidebarStyle: "dark-navy"
+        sidebarStyle: "dark-navy",
+        indexValidation: "^[A-Za-z]{2}/[A-Za-z]{3}/\\d{2}/\\d{3}$"
       };
       await db.insert(schema.appConfig).values(defaultConfig);
       config = defaultConfig;
@@ -1623,6 +1729,68 @@ app.get("/api/app-config", async (req, res) => {
     res.json(config);
   } catch (err: any) {
     res.status(500).json({ error: "Database error fetching application config: " + err.message });
+  }
+});
+
+// Public systems endpoint
+app.get("/api/systems", async (req, res) => {
+  try {
+    const list = await db.select().from(schema.appConfig);
+    if (list.length === 0) {
+      const defaultConfig = {
+        id: "config",
+        systemName: "Group D Class Management System",
+        systemShort: "GDCMS",
+        assignmentsTerm: "Assignments",
+        materialsTerm: "Course Materials",
+        themeColor: "indigo",
+        fontSizePreset: "standard",
+        sidebarStyle: "dark-navy",
+        indexValidation: "^[A-Za-z]{2}/[A-Za-z]{3}/\\d{2}/\\d{3}$"
+      };
+      await db.insert(schema.appConfig).values(defaultConfig);
+      return res.json([defaultConfig]);
+    }
+    res.json(list);
+  } catch (err: any) {
+    res.status(500).json({ error: "Failed to load systems: " + err.message });
+  }
+});
+
+// Admin-only systems creation endpoint
+app.post("/api/admin/systems", authGuard, async (req, res) => {
+  const user = (req as any).user;
+  if (user.role !== "admin") {
+    return res.status(403).json({ error: "Administrative console access required." });
+  }
+  const { id, systemName, systemShort, assignmentsTerm, materialsTerm, themeColor, fontSizePreset, sidebarStyle, indexValidation } = req.body;
+  if (!id || !systemName || !systemShort) {
+    return res.status(400).json({ error: "ID, Name, and Short acronym are mandatory fields." });
+  }
+
+  try {
+    // Check duplication
+    const duplicate = (await db.select().from(schema.appConfig).where(eq(schema.appConfig.id, id)))[0];
+    if (duplicate) {
+      return res.status(400).json({ error: `A Class System with ID '${id}' is already registered.` });
+    }
+
+    await db.insert(schema.appConfig).values({
+      id,
+      systemName,
+      systemShort,
+      assignmentsTerm: assignmentsTerm || "Assignments",
+      materialsTerm: materialsTerm || "Course Materials",
+      themeColor: themeColor || "indigo",
+      fontSizePreset: fontSizePreset || "standard",
+      sidebarStyle: sidebarStyle || "dark-navy",
+      indexValidation: indexValidation || "^[A-Za-z]{2}/[A-Za-z]{3}/\\d{2}/\\d{3}$"
+    });
+
+    const list = await db.select().from(schema.appConfig);
+    res.json({ message: "New Class System created successfully.", systems: list });
+  } catch (err: any) {
+    res.status(500).json({ error: "Database error registering new system: " + err.message });
   }
 });
 
@@ -1635,6 +1803,7 @@ app.post("/api/admin/app-config", authGuard, async (req, res) => {
   if (!config) {
     return res.status(400).json({ error: "Missing configuration parameters." });
   }
+  const targetId = config.id || "config";
 
   try {
     await db.update(schema.appConfig).set({
@@ -1645,9 +1814,10 @@ app.post("/api/admin/app-config", authGuard, async (req, res) => {
       themeColor: config.themeColor,
       fontSizePreset: config.fontSizePreset,
       sidebarStyle: config.sidebarStyle,
-    }).where(eq(schema.appConfig.id, "config"));
+      indexValidation: config.indexValidation,
+    }).where(eq(schema.appConfig.id, targetId));
 
-    const updated = (await db.select().from(schema.appConfig).where(eq(schema.appConfig.id, "config")))[0];
+    const updated = (await db.select().from(schema.appConfig).where(eq(schema.appConfig.id, targetId)))[0];
     res.json({ message: "Application rebranded and restructured successfully.", appConfig: updated });
   } catch (err: any) {
     res.status(500).json({ error: "Database error saving system configuration: " + err.message });

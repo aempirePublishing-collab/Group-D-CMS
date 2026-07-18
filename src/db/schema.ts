@@ -10,6 +10,7 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash"),
   oauthConnected: boolean("oauth_connected").default(false),
   needsPasswordChange: boolean("needs_password_change").default(false),
+  systemId: text("system_id"),
 });
 
 // Courses Table
@@ -21,6 +22,7 @@ export const courses = pgTable("courses", {
   description: text("description").notNull(),
   outlineUrl: text("outline_url"),
   outlineName: text("outline_name"),
+  systemId: text("system_id"),
 });
 
 // Core Materials / Assignments Prompts Table
@@ -99,4 +101,5 @@ export const appConfig = pgTable("app_config", {
   themeColor: text("theme_color").notNull(),
   fontSizePreset: text("font_size_preset").notNull(),
   sidebarStyle: text("sidebar_style").notNull(),
+  indexValidation: text("index_validation"),
 });
